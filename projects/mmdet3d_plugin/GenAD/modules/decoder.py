@@ -81,44 +81,42 @@ class DetectionTransformerDecoder(TransformerLayerSequence):
                 return_intermediate is `False`, otherwise it has shape
                 [num_layers, num_query, bs, embed_dims].
         """
-        output = query
+        output = query  # [300, 1, 256]
         intermediate = []
         intermediate_reference_points = []
         for lid, layer in enumerate(self.layers):
+            # 此处的layer即为Deformable Transformers
 
-            reference_points_input = reference_points[..., :2].unsqueeze(
-                2)  # BS NUM_QUERY NUM_LEVEL 2
+            reference_points_input = reference_points[..., :2].unsqueeze(2)  # BS NUM_QUERY NUM_LEVEL 2 [1, 300, 1, 2]
             output = layer(
                 output,
                 *args,
                 reference_points=reference_points_input,
                 key_padding_mask=key_padding_mask,
                 **kwargs)
-            output = output.permute(1, 0, 2)
+            output = output.permute(1, 0, 2)  # [300, 1, 256] -> [1, 300, 256]
 
             if reg_branches is not None:
-                tmp = reg_branches[lid](output)
+                # 很奇怪，reg_branches[lid]输出的是10个特征，但后续只用了[0, 1]和[4]
+                tmp = reg_branches[lid](output)  # [1, 300, 256] -> [1, 300, 10]
 
                 assert reference_points.shape[-1] == 3
 
                 new_reference_points = torch.zeros_like(reference_points)
-                new_reference_points[..., :2] = tmp[
-                    ..., :2] + inverse_sigmoid(reference_points[..., :2])
-                new_reference_points[..., 2:3] = tmp[
-                    ..., 4:5] + inverse_sigmoid(reference_points[..., 2:3])
+                new_reference_points[..., :2] = tmp[..., :2] + inverse_sigmoid(reference_points[..., :2])
+                new_reference_points[..., 2:3] = tmp[..., 4:5] + inverse_sigmoid(reference_points[..., 2:3])
 
                 new_reference_points = new_reference_points.sigmoid()
 
                 reference_points = new_reference_points.detach()
 
-            output = output.permute(1, 0, 2)
+            output = output.permute(1, 0, 2)  # [1, 300, 256] -> [300, 1, 256]
             if self.return_intermediate:
                 intermediate.append(output)
                 intermediate_reference_points.append(reference_points)
 
         if self.return_intermediate:
-            return torch.stack(intermediate), torch.stack(
-                intermediate_reference_points)
+            return torch.stack(intermediate), torch.stack(intermediate_reference_points)
 
         return output, reference_points
 

@@ -543,20 +543,20 @@ class GenADHead(DETRHead):
 
         bs, num_cam, _, _, _ = mlvl_feats[0].shape
         dtype = mlvl_feats[0].dtype
-        object_query_embeds = self.query_embedding.weight.to(dtype)
 
+        # 从query_embedding、map_pts_embedding和map_instance_embedding中提取各自的weight，作为embed和query
+        # 不理解，按理说上述三个都是nn.Embedding类型的对象，直接用就好了，为什么要特意提取各自的weight？
+        object_query_embeds = self.query_embedding.weight.to(dtype)
         if self.map_query_embed_type == 'all_pts':
             map_query_embeds = self.map_query_embedding.weight.to(dtype)
         elif self.map_query_embed_type == 'instance_pts':
-            map_pts_embeds = self.map_pts_embedding.weight.unsqueeze(0)
-            map_instance_embeds = self.map_instance_embedding.weight.unsqueeze(1)
-            map_query_embeds = (map_pts_embeds + map_instance_embeds).flatten(0, 1).to(dtype)
+            map_pts_embeds = self.map_pts_embedding.weight.unsqueeze(0)  # [1, 20, 512]
+            map_instance_embeds = self.map_instance_embedding.weight.unsqueeze(1)  # [100, 1, 512]
+            map_query_embeds = (map_pts_embeds + map_instance_embeds).flatten(0, 1).to(dtype)  # [2000, 512]
+        bev_queries = self.bev_embedding.weight.to(dtype)  # [10000, 512]
 
-        bev_queries = self.bev_embedding.weight.to(dtype)
-
-        bev_mask = torch.zeros((bs, self.bev_h, self.bev_w),
-                               device=bev_queries.device).to(dtype)
-        bev_pos = self.positional_encoding(bev_mask).to(dtype)
+        bev_mask = torch.zeros((bs, self.bev_h, self.bev_w), device=bev_queries.device).to(dtype)  # [1, 100, 100]
+        bev_pos = self.positional_encoding(bev_mask).to(dtype)  # [1, 256, 100, 100]
 
         if only_bev:  # only use encoder to obtain BEV features, TODO: refine the workaround
             return self.transformer.get_bev_features(
@@ -597,30 +597,29 @@ class GenADHead(DETRHead):
         # map_init_reference: reference points init
         # map_inter_references: reference points processing
 
-        bev_embed, hs, init_reference, inter_references, \
-        map_hs, map_init_reference, map_inter_references = outputs
+        bev_embed, hs, init_reference, inter_references, map_hs, map_init_reference, map_inter_references = outputs
 
-        hs = hs.permute(0, 2, 1, 3)
+        hs = hs.permute(0, 2, 1, 3)  # [3, 300, 1, 256] -> [3, 1, 300, 256]
         outputs_classes = []
         outputs_coords = []
         outputs_coords_bev = []
         outputs_trajs = []
         outputs_trajs_classes = []
 
-        map_hs = map_hs.permute(0, 2, 1, 3)
+        map_hs = map_hs.permute(0, 2, 1, 3)  # [3, 2000, 1, 256] -> [3, 1, 2000, 256]
         map_outputs_classes = []
         map_outputs_coords = []
         map_outputs_pts_coords = []
         map_outputs_coords_bev = []
 
-        for lvl in range(hs.shape[0]):
+        for lvl in range(hs.shape[0]):  # hs.shape = [3, 1, 300, 256]
             if lvl == 0:
                 reference = init_reference
             else:
                 reference = inter_references[lvl - 1]
             reference = inverse_sigmoid(reference)
-            outputs_class = self.cls_branches[lvl](hs[lvl])
-            tmp = self.reg_branches[lvl](hs[lvl])
+            outputs_class = self.cls_branches[lvl](hs[lvl])  # [1, 300, 256] -> [1, 300, 10]
+            tmp = self.reg_branches[lvl](hs[lvl])  # [1, 300, 256] -> [1, 300, 10]
 
             # TODO: check the shape of reference
             assert reference.shape[-1] == 3
@@ -629,12 +628,9 @@ class GenADHead(DETRHead):
             outputs_coords_bev.append(tmp[..., 0:2].clone().detach())
             tmp[..., 4:5] = tmp[..., 4:5] + reference[..., 2:3]
             tmp[..., 4:5] = tmp[..., 4:5].sigmoid()
-            tmp[..., 0:1] = (tmp[..., 0:1] * (self.pc_range[3] -
-                                              self.pc_range[0]) + self.pc_range[0])
-            tmp[..., 1:2] = (tmp[..., 1:2] * (self.pc_range[4] -
-                                              self.pc_range[1]) + self.pc_range[1])
-            tmp[..., 4:5] = (tmp[..., 4:5] * (self.pc_range[5] -
-                                              self.pc_range[2]) + self.pc_range[2])
+            tmp[..., 0:1] = (tmp[..., 0:1] * (self.pc_range[3] - self.pc_range[0]) + self.pc_range[0])
+            tmp[..., 1:2] = (tmp[..., 1:2] * (self.pc_range[4] - self.pc_range[1]) + self.pc_range[1])
+            tmp[..., 4:5] = (tmp[..., 4:5] * (self.pc_range[5] - self.pc_range[2]) + self.pc_range[2])
 
             # TODO: check if using sigmoid
             outputs_coord = tmp
@@ -647,10 +643,10 @@ class GenADHead(DETRHead):
             else:
                 reference = map_inter_references[lvl - 1]
             reference = inverse_sigmoid(reference)
-            map_outputs_class = self.map_cls_branches[lvl](
+            map_outputs_class = self.map_cls_branches[lvl](  # [1, 2000, 256] -> [1, 100, 20, 256] -> [1, 100, 256] -> [1, 100, 3]
                 map_hs[lvl].view(bs, self.map_num_vec, self.map_num_pts_per_vec, -1).mean(2)
             )
-            tmp = self.map_reg_branches[lvl](map_hs[lvl])
+            tmp = self.map_reg_branches[lvl](map_hs[lvl])  # [1, 2000, 256] -> [1, 2000, 2]
             # TODO: check the shape of reference
             assert reference.shape[-1] == 2
             tmp[..., 0:2] += reference[..., 0:2]
@@ -662,23 +658,28 @@ class GenADHead(DETRHead):
             map_outputs_pts_coords.append(map_outputs_pts_coord)
 
         # motion prediction
+        # 重点关注对象
 
         # motion query
         if self.motion_decoder is not None:
-            batch_size, num_agent = outputs_coords_bev[-1].shape[:2]
+            batch_size, num_agent = outputs_coords_bev[-1].shape[:2]  # [1, 300, 2]
             # motion_query
-            motion_query = hs[-1].permute(1, 0, 2)  # [A, B, D]
-            mode_query = self.motion_mode_query.weight  # [fut_mode, D]
+            motion_query = hs[-1].permute(1, 0, 2)  # [A, B, D]  [3, 1, 300, 256] -> [1, 300, 256] -> [300, 1, 256]
+            mode_query = self.motion_mode_query.weight  # [fut_mode, D]  [6, 256]
             # [M, B, D], M=A*fut_mode
-            motion_query = (motion_query[:, None, :, :] + mode_query[None, :, None, :]).flatten(0, 1)
+            motion_query = (motion_query[:, None, :, :] + mode_query[None, :, None, :]).flatten(0, 1)  # [300, 6, 1, 256] -> [1800, 1, 256]
+
+            # A: 300, B: 1, D: 256, fut_mode: 6, M: 1800
+
             if self.use_pe:
-                motion_coords = outputs_coords_bev[-1]  # [B, A, 2]
-                motion_pos = self.pos_mlp_sa(motion_coords)  # [B, A, D]
-                motion_pos = motion_pos.unsqueeze(2).repeat(1, 1, self.fut_mode, 1).flatten(1, 2)
-                motion_pos = motion_pos.permute(1, 0, 2)  # [M, B, D]
+                motion_coords = outputs_coords_bev[-1]  # [B, A, 2]  [1, 300, 2]
+                motion_pos = self.pos_mlp_sa(motion_coords)  # [B, A, D]  [1, 300, 2] -> [1, 300, 256]
+                motion_pos = motion_pos.unsqueeze(2).repeat(1, 1, self.fut_mode, 1).flatten(1, 2)  # [1, 300, 256] -> [1, 300, 1, 256] -> [1, 300, 6, 256] -> [1, 1800, 256]
+                motion_pos = motion_pos.permute(1, 0, 2)  # [M, B, D]  [1800, 1, 256]
             else:
                 motion_pos = None
 
+            # 尚未传入self.motion_det_score
             if self.motion_det_score is not None:
                 motion_score = outputs_classes[-1]
                 max_motion_score = motion_score.max(dim=-1)[0]
@@ -692,56 +693,60 @@ class GenADHead(DETRHead):
             if self.ego_his_encoder is not None:
                 ego_his_feats = self.ego_his_encoder(ego_his_trajs)  # [B, 1, dim]
             else:
-                ego_his_feats = self.ego_query.weight.unsqueeze(0).repeat(batch_size, 1, 1)
-                # ego <-> agent Interaction
-            ego_query = ego_his_feats.permute(1, 0, 2)
-            ego_pos = torch.zeros((batch_size, 1, 2), device=ego_query.device).permute(1, 0, 2)
-            ego_pos_emb = self.ego_agent_pos_mlp(ego_pos)
+                ego_his_feats = self.ego_query.weight.unsqueeze(0).repeat(batch_size, 1, 1)  # [1, 256] -> [1, 1, 256] -> [1, 1, 256]
+            ego_query = ego_his_feats.permute(1, 0, 2)  # [1, 1, 256]
+            ego_pos = torch.zeros((batch_size, 1, 2), device=ego_query.device).permute(1, 0, 2)  # [1, 1, 2]
+            ego_pos_emb = self.ego_agent_pos_mlp(ego_pos)  # [1, 1, 2] -> [1, 1, 256]
 
-            motion_query = torch.cat([motion_query, ego_query], dim=0)
-            motion_pos = torch.cat([motion_pos, ego_pos_emb], dim=0)
+            # ego <-> agent Interaction
+            motion_query = torch.cat([motion_query, ego_query], dim=0)  # [1801, 1, 256]
+            motion_pos = torch.cat([motion_pos, ego_pos_emb], dim=0)  # [1801, 1, 256]
 
+            # 此处的decoder就是TransformerDecoder
             motion_hs = self.motion_decoder(
                 query=motion_query,
                 key=motion_query,
                 value=motion_query,
                 query_pos=motion_pos,
                 key_pos=motion_pos,
-                key_padding_mask=invalid_motion_idx)
+                key_padding_mask=invalid_motion_idx
+            )
 
             if self.motion_map_decoder is not None:
                 # map preprocess
-                motion_coords = outputs_coords_bev[-1]  # [B, A, 2]
-                motion_coords = motion_coords.unsqueeze(2).repeat(1, 1, self.fut_mode, 1).flatten(1, 2)
+                motion_coords = outputs_coords_bev[-1]  # [B, A, 2]  [1, 300, 2]
+                motion_coords = motion_coords.unsqueeze(2).repeat(1, 1, self.fut_mode, 1).flatten(1, 2)  # [1, 300, 2] -> [1, 300, 1, 2] -> [1, 300, 6, 2] -> [1, 1800, 2]
 
                 # ego_coords = torch.Tensor(1, 1, 2).cuda(1)
-                ego_coords = torch.zeros([batch_size, 1, 2], device=motion_hs.device)
-                ego_coords_embd = self.ego_coord_mlp(ego_coords)
+                ego_coords = torch.zeros([batch_size, 1, 2], device=motion_hs.device)  # [1, 1, 2]
+                ego_coords_embd = self.ego_coord_mlp(ego_coords)  # [1, 1, 2] -> [1, 1, 2]
                 # ego_coords_embd = torch.zeros([batch_size, 1, 2], device=motion_hs.device)
-                motion_coords = torch.cat([motion_coords, ego_coords_embd], dim=1)
+                motion_coords = torch.cat([motion_coords, ego_coords_embd], dim=1)  # [1, 1801, 2]
 
-                map_query = map_hs[-1].view(batch_size, self.map_num_vec, self.map_num_pts_per_vec, -1)
-                map_query = self.lane_encoder(map_query)  # [B, P, pts, D] -> [B, P, D]
-                map_score = map_outputs_classes[-1]
-                map_pos = map_outputs_coords_bev[-1]
-                map_query, map_pos, key_padding_mask = self.select_and_pad_pred_map(
+                map_query = map_hs[-1].view(batch_size, self.map_num_vec, self.map_num_pts_per_vec, -1)  # [1, 2000, 256] -> [1, 100, 20, 256]
+                map_query = self.lane_encoder(map_query)  # [B, P, pts, D] -> [B, P, D]  [1, 100, 20, 256] -> [1, 100, 256]q
+                map_score = map_outputs_classes[-1]  # [1, 100, 3]
+                map_pos = map_outputs_coords_bev[-1]  # [1, 100, 20, 2]
+                map_query, map_pos, key_padding_mask = self.select_and_pad_pred_map(  # [1801, 1, 256], [1801, 1, 2], [1801, 1]
                     motion_coords, map_query, map_score, map_pos,
                     map_thresh=self.map_thresh, dis_thresh=self.dis_thresh,
-                    pe_normalization=self.pe_normalization, use_fix_pad=True)
-                map_query = map_query.permute(1, 0, 2)  # [P, B*M, D]
-                ca_motion_query = motion_hs.permute(1, 0, 2).flatten(0, 1).unsqueeze(0)
+                    pe_normalization=self.pe_normalization, use_fix_pad=True
+                )
+                map_query = map_query.permute(1, 0, 2)  # [P, B*M, D]  [1, 1801, 256]
+                ca_motion_query = motion_hs.permute(1, 0, 2).flatten(0, 1).unsqueeze(0)  # [1801, 1, 256] -> [1, 1801, 256] -> [1801, 256] -> [1, 1801, 256]
 
                 # position encoding
                 if self.use_pe:
-                    (num_query, batch) = ca_motion_query.shape[:2]
-                    motion_pos = torch.zeros((num_query, batch, 2), device=motion_hs.device)
-                    motion_pos = self.pos_mlp(motion_pos)
-                    map_pos = map_pos.permute(1, 0, 2)
-                    map_pos = self.pos_mlp(map_pos)
+                    (num_query, batch) = ca_motion_query.shape[:2]  # [1, 1801, 256]
+                    motion_pos = torch.zeros((num_query, batch, 2), device=motion_hs.device)  # [1, 1801, 2]
+                    motion_pos = self.pos_mlp(motion_pos)  # [1, 1801, 2] -> [1, 1801, 256]
+                    map_pos = map_pos.permute(1, 0, 2)  # [1801, 1, 2] -> [1, 1801, 2]
+                    map_pos = self.pos_mlp(map_pos)  # [1, 1801, 2] -> [1, 1801, 256]
                 else:
                     motion_pos, map_pos = None, None
 
-                ca_motion_query = self.motion_map_decoder(
+                # 此处的decoder就是TransformerDecoder
+                ca_motion_query = self.motion_map_decoder(  # [1, 1801, 256]
                     query=ca_motion_query,
                     key=map_query,
                     value=map_query,
@@ -753,14 +758,19 @@ class GenADHead(DETRHead):
 
             ########################################
             # generator for planning & motion
-            current_states = torch.cat((motion_hs.permute(1, 0, 2), ca_motion_query.reshape(batch_size, -1, self.embed_dims)), dim=2)
+            current_states = torch.cat([
+                motion_hs.permute(1, 0, 2),  # [1801, 1, 256] -> [1, 1801, 256]
+                ca_motion_query.reshape(batch_size, -1, self.embed_dims)  # [1, 1801, 256] -> [1, 1801, 256]
+            ], dim=2)
             distribution_comp = {}
             # states = torch.randn((2, 1, 64, 200, 200), device=motion_hs.device)
             # future_distribution_inputs = torch.randn((2, 5, 6, 200, 200), device=motion_hs.device)
             noise = None
             if self.training:
-                future_distribution_inputs = self.get_future_labels(gt_labels_3d, gt_attr_labels,
-                                                                    ego_fut_trajs, motion_hs.device)
+                future_distribution_inputs = self.get_future_labels(
+                    gt_labels_3d, gt_attr_labels,
+                    ego_fut_trajs, motion_hs.device
+                )
             else:
                 future_distribution_inputs = None
 
@@ -824,21 +834,21 @@ class GenADHead(DETRHead):
         # outputs_trajs_classes = outputs_trajs_classes.repeat(outputs_coords.shape[0], 1, 1, 1)
 
         outs = {
-            'bev_embed': bev_embed,
-            'all_cls_scores': outputs_classes,
-            'all_bbox_preds': outputs_coords,
-            'all_traj_preds': outputs_trajs.repeat(outputs_coords.shape[0], 1, 1, 1, 1),
-            'all_traj_cls_scores': outputs_trajs_classes.repeat(outputs_coords.shape[0], 1, 1, 1),
-            'map_all_cls_scores': map_outputs_classes,
-            'map_all_bbox_preds': map_outputs_coords,
-            'map_all_pts_preds': map_outputs_pts_coords,
+            'bev_embed': bev_embed,  # [10000, 1, 256]
+            'all_cls_scores': outputs_classes,  # [3, 1, 300, 10]
+            'all_bbox_preds': outputs_coords,  # [3, 1, 300, 10]
+            'all_traj_preds': outputs_trajs.repeat(outputs_coords.shape[0], 1, 1, 1, 1),  # [3, 1, 300, 6, 12]
+            'all_traj_cls_scores': outputs_trajs_classes.repeat(outputs_coords.shape[0], 1, 1, 1),  # [3, 1, 300, 6]
+            'map_all_cls_scores': map_outputs_classes,  # [3, 1, 100, 3]
+            'map_all_bbox_preds': map_outputs_coords,  # [3, 1, 100, 4]
+            'map_all_pts_preds': map_outputs_pts_coords,  # [3, 1, 100, 20, 2]
             'enc_cls_scores': None,
             'enc_bbox_preds': None,
             'map_enc_cls_scores': None,
             'map_enc_bbox_preds': None,
             'map_enc_pts_preds': None,
-            'ego_fut_preds': ego_trajs,
-            'loss_vae_gen': distribution_comp,
+            'ego_fut_preds': ego_trajs,  # [1, 3, 6, 2]
+            'loss_vae_gen': distribution_comp,  # dict
         }
 
         return outs

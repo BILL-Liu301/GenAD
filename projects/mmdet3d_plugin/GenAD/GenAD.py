@@ -80,13 +80,13 @@ class GenAD(MVXTwoStageDetector):
             if self.use_grid_mask:
                 img = self.grid_mask(img)
 
-            img_feats = self.img_backbone(img)
+            img_feats = self.img_backbone(img)  # 使用骨干网络提取图像特征，这里的骨干是ResNet
             if isinstance(img_feats, dict):
                 img_feats = list(img_feats.values())
         else:
             return None
         if self.with_img_neck:
-            img_feats = self.img_neck(img_feats)
+            img_feats = self.img_neck(img_feats)  # 使用FPN再提取一次
 
         img_feats_reshaped = []
         for img_feat in img_feats:
@@ -136,10 +136,13 @@ class GenAD(MVXTwoStageDetector):
             dict: Losses of each branch.
         """
 
+        # 此处的pts_feats其实就是img_feats，从6个相机中提取的特征，并根据特征进行模型的主体计算
         outs = self.pts_bbox_head(pts_feats, img_metas, prev_bev,
                                   ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,
                                   gt_labels_3d=gt_labels_3d, gt_attr_labels=gt_attr_labels,
                                   ego_fut_trajs=ego_fut_trajs)
+
+        # 计算loss
         loss_inputs = [
             gt_bboxes_3d, gt_labels_3d, map_gt_bboxes_3d, map_gt_labels_3d,
             outs, ego_fut_trajs, ego_fut_masks, ego_fut_cmd, gt_attr_labels,
@@ -174,14 +177,13 @@ class GenAD(MVXTwoStageDetector):
         with torch.no_grad():
             prev_bev = None
             bs, len_queue, num_cams, C, H, W = imgs_queue.shape
-            imgs_queue = imgs_queue.reshape(bs*len_queue, num_cams, C, H, W)
+            imgs_queue = imgs_queue.reshape(bs*len_queue, num_cams, C, H, W)  # 将batch_size和历史帧数整合
             img_feats_list = self.extract_feat(img=imgs_queue, len_queue=len_queue)
             for i in range(len_queue):
-                img_metas = [each[i] for each in img_metas_list]
+                img_metas = [each[i] for each in img_metas_list]  # 从img_metas_list中提取对应帧的meta
                 # img_feats = self.extract_feat(img=img, img_metas=img_metas)
                 img_feats = [each_scale[:, i] for each_scale in img_feats_list]
-                prev_bev = self.pts_bbox_head(
-                    img_feats, img_metas, prev_bev, only_bev=True)
+                prev_bev = self.pts_bbox_head(img_feats, img_metas, prev_bev, only_bev=True)  # 只针对bev进行计算
             self.train()
             return prev_bev
 
@@ -232,18 +234,21 @@ class GenAD(MVXTwoStageDetector):
         Returns:
             dict: Losses of different branches.
         """
-        
+        # 完整的img.shape = [1, 3, 6, 3, 385, 640]
         len_queue = img.size(1)
-        prev_img = img[:, :-1, ...]
-        img = img[:, -1, ...]
+        prev_img = img[:, :-1, ...]  # 历史图像
+        img = img[:, -1, ...]  # 当前图像
 
+        # 从历史图像数据中提取bev信息
         prev_img_metas = copy.deepcopy(img_metas)
-        # prev_bev = self.obtain_history_bev(prev_img, prev_img_metas)
-        # import pdb;pdb.set_trace()
-        prev_bev = self.obtain_history_bev(prev_img, prev_img_metas) if len_queue > 1 else None
+        prev_bev = self.obtain_history_bev(prev_img, prev_img_metas) if len_queue > 1 else None  # 先self.extract_feat后self.pts_bbox_head
 
+        # 提取图像特征
         img_metas = [each[len_queue-1] for each in img_metas]
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
+
+        # 计算loss
+        # 我觉得这里写的很抽象，包含了模型的主要架构和计算loss，但看起来就像是只计算loss
         losses = dict()
         losses_pts = self.forward_pts_train(img_feats, gt_bboxes_3d, gt_labels_3d,
                                             map_gt_bboxes_3d, map_gt_labels_3d, img_metas,

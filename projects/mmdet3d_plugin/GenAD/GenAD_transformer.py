@@ -75,31 +75,28 @@ class MapDetectionTransformerDecoder(TransformerLayerSequence):
                 return_intermediate is `False`, otherwise it has shape
                 [num_layers, num_query, bs, embed_dims].
         """
-        output = query
+        output = query  # [2000, 1, 256]
         intermediate = []
         intermediate_reference_points = []
         for lid, layer in enumerate(self.layers):
+            # 此处的layer即为Deformable Transformers
 
-            reference_points_input = reference_points[..., :2].unsqueeze(
-                2)  # BS NUM_QUERY NUM_LEVEL 2
-            output = layer(
+            reference_points_input = reference_points[..., :2].unsqueeze(2)  # BS NUM_QUERY NUM_LEVEL 2 [1, 2000, 2]
+            output = layer(  # [2000, 1, 256]
                 output,
                 *args,
                 reference_points=reference_points_input,
                 key_padding_mask=key_padding_mask,
                 **kwargs)
-            output = output.permute(1, 0, 2)
+            output = output.permute(1, 0, 2)  # [2000, 1, 256] -> [1, 2000, 256]
 
             if reg_branches is not None:
-                tmp = reg_branches[lid](output)
+                tmp = reg_branches[lid](output)  # [1, 2000, 2]
 
                 assert reference_points.shape[-1] == 2
 
                 new_reference_points = torch.zeros_like(reference_points)
-                new_reference_points[..., :2] = tmp[
-                    ..., :2] + inverse_sigmoid(reference_points[..., :2])
-                # new_reference_points[..., 2:3] = tmp[
-                #     ..., 4:5] + inverse_sigmoid(reference_points[..., 2:3])
+                new_reference_points[..., :2] = tmp[..., :2] + inverse_sigmoid(reference_points[..., :2])
 
                 new_reference_points = new_reference_points.sigmoid()
 
@@ -224,29 +221,24 @@ class GenADPerceptionTransformer(BaseModule):
         """
 
         bs = mlvl_feats[0].size(0)
-        bev_queries = bev_queries.unsqueeze(1).repeat(1, bs, 1)
-        bev_pos = bev_pos.flatten(2).permute(2, 0, 1)
+        bev_queries = bev_queries.unsqueeze(1).repeat(1, bs, 1)  # [10000, 1, 256]
+        bev_pos = bev_pos.flatten(2).permute(2, 0, 1)  # [1, 256, 100, 100]->[1, 256, 10000]->[10000, 1, 256]
+        img_metas = kwargs['img_metas']  # 从kwargs中取出img_metas
 
         # obtain rotation angle and shift with ego motion
-        delta_x = np.array([each['can_bus'][0]
-                           for each in kwargs['img_metas']])
-        delta_y = np.array([each['can_bus'][1]
-                           for each in kwargs['img_metas']])
-        ego_angle = np.array(
-            [each['can_bus'][-2] / np.pi * 180 for each in kwargs['img_metas']])
-        grid_length_y = grid_length[0]
-        grid_length_x = grid_length[1]
-        translation_length = np.sqrt(delta_x ** 2 + delta_y ** 2)
-        translation_angle = np.arctan2(delta_y, delta_x) / np.pi * 180
-        bev_angle = ego_angle - translation_angle
-        shift_y = translation_length * \
-            np.cos(bev_angle / 180 * np.pi) / grid_length_y / bev_h
-        shift_x = translation_length * \
-            np.sin(bev_angle / 180 * np.pi) / grid_length_x / bev_w
+        # 遍历所有帧的img_metas，但其实一般都只有1帧
+        delta_x = np.array([each['can_bus'][0] for each in img_metas])
+        delta_y = np.array([each['can_bus'][1] for each in img_metas])
+        ego_angle = np.array([each['can_bus'][-2] / np.pi * 180 for each in img_metas])
+        grid_length_y, grid_length_x = grid_length
+        translation_length = np.sqrt(delta_x ** 2 + delta_y ** 2)  # 移动的绝对距离
+        translation_angle = np.arctan2(delta_y, delta_x) / np.pi * 180  # 移动的角度
+        bev_angle = ego_angle - translation_angle  # BEV特征图中的航向角？
+        shift_y = translation_length * np.cos(bev_angle / 180 * np.pi) / grid_length_y / bev_h  # BEV特征图中的y方向偏移量？
+        shift_x = translation_length * np.sin(bev_angle / 180 * np.pi) / grid_length_x / bev_w  # BEV特征图中的x方向偏移量？
         shift_y = shift_y * self.use_shift
         shift_x = shift_x * self.use_shift
-        shift = bev_queries.new_tensor(
-            [shift_x, shift_y]).permute(1, 0)  # xy, bs -> bs, xy
+        shift = bev_queries.new_tensor([shift_x, shift_y]).permute(1, 0)  # [2, 1] -> [1, 2]
 
         if prev_bev is not None:
             if prev_bev.shape[1] == bev_h * bev_w:
@@ -254,7 +246,7 @@ class GenADPerceptionTransformer(BaseModule):
             if self.rotate_prev_bev:
                 for i in range(bs):
                     # num_prev_bev = prev_bev.size(1)
-                    rotation_angle = kwargs['img_metas'][i]['can_bus'][-1]
+                    rotation_angle = img_metas[i]['can_bus'][-1]
                     tmp_prev_bev = prev_bev[:, i].reshape(
                         bev_h, bev_w, -1).permute(2, 0, 1)
                     tmp_prev_bev = rotate(tmp_prev_bev, rotation_angle,
@@ -264,34 +256,35 @@ class GenADPerceptionTransformer(BaseModule):
                     prev_bev[:, i] = tmp_prev_bev[:, 0]
 
         # add can bus signals
-        can_bus = bev_queries.new_tensor(
-            [each['can_bus'] for each in kwargs['img_metas']])  # [:, :]
-        can_bus = self.can_bus_mlp(can_bus)[None, :, :]
-        bev_queries = bev_queries + can_bus * self.use_can_bus
+        can_bus = bev_queries.new_tensor([each['can_bus'] for each in img_metas])  # [1, 18]
+        can_bus = self.can_bus_mlp(can_bus)[None, :, :]  # [1, 18] -> [1, 256] -> [1, 1, 256]
+        bev_queries = bev_queries + can_bus * self.use_can_bus  # [10000, 1, 256]
 
         feat_flatten = []
         spatial_shapes = []
         for lvl, feat in enumerate(mlvl_feats):
             bs, num_cam, c, h, w = feat.shape
             spatial_shape = (h, w)
-            feat = feat.flatten(3).permute(1, 0, 3, 2)
+            feat = feat.flatten(3).permute(1, 0, 3, 2)  # [1, 6, 256, 12, 20] -> [1, 6, 256, 240] -> [6, 1, 240, 256]
+
             if self.use_cams_embeds:
                 feat = feat + self.cams_embeds[:, None, None, :].to(feat.dtype)
-            feat = feat + self.level_embeds[None,
-                                            None, lvl:lvl + 1, :].to(feat.dtype)
-            spatial_shapes.append(spatial_shape)
+            feat = feat + self.level_embeds[None, None, lvl:lvl + 1, :].to(feat.dtype)
+
             feat_flatten.append(feat)
+            spatial_shapes.append(spatial_shape)
 
         feat_flatten = torch.cat(feat_flatten, 2)
-        spatial_shapes = torch.as_tensor(
-            spatial_shapes, dtype=torch.long, device=bev_pos.device)
-        level_start_index = torch.cat((spatial_shapes.new_zeros(
-            (1,)), spatial_shapes.prod(1).cumsum(0)[:-1]))
+        spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=bev_pos.device)
+        level_start_index = torch.cat([
+            spatial_shapes.new_zeros((1,)), 
+            spatial_shapes.prod(1).cumsum(0)[:-1]
+        ])
 
-        feat_flatten = feat_flatten.permute(
-            0, 2, 1, 3)  # (num_cam, H*W, bs, embed_dims)
+        feat_flatten = feat_flatten.permute(0, 2, 1, 3)  # [6, 1, 240, 256] -> [6, 240, 1, 256]
 
-        bev_embed = self.encoder(
+        # 使用BEVFormerEncoder进行处理
+        bev_embed = self.encoder(  # [1, 10000, 256]
             bev_queries,
             feat_flatten,
             feat_flatten,
@@ -360,9 +353,9 @@ class GenADPerceptionTransformer(BaseModule):
                     be returned when `as_two_stage` is True, \
                     otherwise None.
         """
-
-        bev_embed = self.get_bev_features(
-            mlvl_feats,
+        # 将mlvl_feats的特征与自车状态和can_bus相融合，最后使用BEVFormerEncoder进行编码
+        bev_embed = self.get_bev_features(  # [1, 10000, 256]
+            mlvl_feats,  # [1, 6, 256, 12, 20]
             bev_queries,
             bev_h,
             bev_w,
@@ -372,31 +365,29 @@ class GenADPerceptionTransformer(BaseModule):
             **kwargs)  # bev_embed shape: bs, bev_h*bev_w, embed_dims
 
         bs = mlvl_feats[0].size(0)
-        query_pos, query = torch.split(
-            object_query_embed, self.embed_dims, dim=1)
-        query_pos = query_pos.unsqueeze(0).expand(bs, -1, -1)
-        query = query.unsqueeze(0).expand(bs, -1, -1)
-        reference_points = self.reference_points(query_pos)
+        query_pos, query = torch.split(object_query_embed, self.embed_dims, dim=1)  # [300, 512] -> [300, 256] + [300, 256]
+        query_pos = query_pos.unsqueeze(0).expand(bs, -1, -1)  # [1, 300, 256]
+        query = query.unsqueeze(0).expand(bs, -1, -1)  # [1, 300, 256]
+        reference_points = self.reference_points(query_pos)  # self.reference_points其实就是一层神经网络，256->3
         reference_points = reference_points.sigmoid()
         init_reference_out = reference_points
 
-        map_query_pos, map_query = torch.split(
-            map_query_embed, self.embed_dims, dim=1)
-        map_query_pos = map_query_pos.unsqueeze(0).expand(bs, -1, -1)
-        map_query = map_query.unsqueeze(0).expand(bs, -1, -1)
-        map_reference_points = self.map_reference_points(map_query_pos)
+        map_query_pos, map_query = torch.split( map_query_embed, self.embed_dims, dim=1)  # [2000, 512] -> [2000, 256] + [2000, 256]
+        map_query_pos = map_query_pos.unsqueeze(0).expand(bs, -1, -1)  # [1, 2000, 256]
+        map_query = map_query.unsqueeze(0).expand(bs, -1, -1)  # [1, 2000, 256]
+        map_reference_points = self.map_reference_points(map_query_pos)  # 同上，256->2
         map_reference_points = map_reference_points.sigmoid()
         map_init_reference_out = map_reference_points        
 
-        query = query.permute(1, 0, 2)
-        query_pos = query_pos.permute(1, 0, 2)
-        map_query = map_query.permute(1, 0, 2)
-        map_query_pos = map_query_pos.permute(1, 0, 2)
-        bev_embed = bev_embed.permute(1, 0, 2)
+        query = query.permute(1, 0, 2)  # [1, 300, 256] -> [300, 1, 256]
+        query_pos = query_pos.permute(1, 0, 2)  # [1, 300, 256] -> [300, 1, 256]
+        map_query = map_query.permute(1, 0, 2)  # [1, 2000, 256] -> [2000, 1, 256]
+        map_query_pos = map_query_pos.permute(1, 0, 2)  # [1, 2000, 256] -> [2000, 1, 256]
+        bev_embed = bev_embed.permute(1, 0, 2)  # [1, 10000, 256] -> [10000, 1, 256]
 
         if self.decoder is not None:
             # [L, Q, B, D], [L, B, Q, D]
-            inter_states, inter_references = self.decoder(
+            inter_states, inter_references = self.decoder(  # [3, 300, 1, 256], [3, 1, 300, 3]
                 query=query,
                 key=None,
                 value=bev_embed,
@@ -414,7 +405,7 @@ class GenADPerceptionTransformer(BaseModule):
 
         if self.map_decoder is not None:
             # [L, Q, B, D], [L, B, Q, D]
-            map_inter_states, map_inter_references = self.map_decoder(
+            map_inter_states, map_inter_references = self.map_decoder(  # [3, 2000, 1, 256], [3, 1, 2000, 2]
                 query=map_query,
                 key=None,
                 value=bev_embed,
@@ -432,7 +423,8 @@ class GenADPerceptionTransformer(BaseModule):
 
         return (
             bev_embed, inter_states, init_reference_out, inter_references_out,
-            map_inter_states, map_init_reference_out, map_inter_references_out)
+            map_inter_states, map_init_reference_out, map_inter_references_out
+        )
 
 
 @TRANSFORMER_LAYER_SEQUENCE.register_module()

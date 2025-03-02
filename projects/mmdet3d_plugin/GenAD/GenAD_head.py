@@ -703,6 +703,7 @@ class GenADHead(DETRHead):
             motion_pos = torch.cat([motion_pos, ego_pos_emb], dim=0)  # [1801, 1, 256]
 
             # 此处的decoder就是TransformerDecoder
+            # 公式5
             motion_hs = self.motion_decoder(
                 query=motion_query,
                 key=motion_query,
@@ -746,6 +747,7 @@ class GenADHead(DETRHead):
                     motion_pos, map_pos = None, None
 
                 # 此处的decoder就是TransformerDecoder
+                # 公式6
                 ca_motion_query = self.motion_map_decoder(  # [1, 1801, 256]
                     query=ca_motion_query,
                     key=map_query,

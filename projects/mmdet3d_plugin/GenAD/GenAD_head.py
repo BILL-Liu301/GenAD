@@ -252,10 +252,12 @@ class GenADHead(DETRHead):
         self.traj_bg_cls_weight = 0
 
         super(GenADHead, self).__init__(*args, transformer=transformer, **kwargs)
-        self.code_weights = nn.Parameter(torch.tensor(
-            self.code_weights, requires_grad=False), requires_grad=False)
-        self.map_code_weights = nn.Parameter(torch.tensor(
-            self.map_code_weights, requires_grad=False), requires_grad=False)
+        self.code_weights = nn.Parameter(torch.tensor(self.code_weights, requires_grad=False), requires_grad=False)
+        self.map_code_weights = nn.Parameter(torch.tensor(self.map_code_weights, requires_grad=False), requires_grad=False)
+        self.cmd_query = nn.Embedding(3, self.embed_dims)
+        self.cmd_pos = nn.Embedding(3, self.embed_dims)
+        self.cmd_query_mlp = nn.Linear(self.embed_dims * 2, self.embed_dims)
+        self.cmd_pos_mlp = nn.Linear(self.embed_dims * 2, self.embed_dims)
 
         if kwargs['train_cfg'] is not None:
             assert 'map_assigner' in kwargs['train_cfg'], 'map assigner should be provided ' \
@@ -524,6 +526,7 @@ class GenADHead(DETRHead):
                 gt_labels_3d=None,
                 gt_attr_labels=None,
                 ego_fut_trajs=None,
+                ego_fut_cmd=None
                 ):
         """Forward function.
         Args:
@@ -699,17 +702,29 @@ class GenADHead(DETRHead):
             ego_pos_emb = self.ego_agent_pos_mlp(ego_pos)  # [1, 1, 2] -> [1, 1, 256]
 
             # ego <-> agent Interaction
-            motion_query = torch.cat([motion_query, ego_query], dim=0)  # [1801, 1, 256]
-            motion_pos = torch.cat([motion_pos, ego_pos_emb], dim=0)  # [1801, 1, 256]
+            # motion_query = torch.cat([motion_query, ego_query], dim=0)  # [1801, 1, 256]
+            # motion_pos = torch.cat([motion_pos, ego_pos_emb], dim=0)  # [1801, 1, 256]
+            # 将指令进行特征提取
+            cmd = ego_fut_cmd.argmax().expand(1, 1)  # [1, 1, 3] -> [1, 1]
+            cmd_query = self.cmd_query(cmd)  # [1, 1, 256]
+            cmd_pos = self.cmd_pos(cmd)  # [1, 1, 256]
+            # cmd_motion_query和cmd_motion_pos分别与motion_query和motion_pos进行拼接并特征融合
+            cmd_ego_query = torch.cat([cmd_query, ego_query], dim=-1)  # [1, 1, 512]
+            cmd_ego_pos = torch.cat([cmd_pos, ego_pos_emb], dim=-1)  # [1, 1, 512]
+            cmd_ego_query = self.cmd_query_mlp(cmd_ego_query)  # [1, 1, 256]
+            cmd_ego_pos = self.cmd_pos_mlp(cmd_ego_pos)  # [1, 1, 256]
+            # 并入motion_query和motion_pos中
+            motion_query = torch.cat([motion_query, cmd_ego_query], dim=0)  # [1801, 1, 256]
+            motion_pos = torch.cat([motion_pos, cmd_ego_pos], dim=0)  # [1801, 1, 256]
 
             # 此处的decoder就是TransformerDecoder
             # 公式5
-            motion_hs = self.motion_decoder(
-                query=motion_query,
-                key=motion_query,
-                value=motion_query,
-                query_pos=motion_pos,
-                key_pos=motion_pos,
+            motion_hs = self.motion_decoder(  # [1801, 1, 256]
+                query=motion_query,  # [1801, 1, 256]
+                key=motion_query,  # [1801, 1, 256]
+                value=motion_query,  # [1801, 1, 256]
+                query_pos=motion_pos,  # [1801, 1, 256]
+                key_pos=motion_pos,  # [1801, 1, 256]
                 key_padding_mask=invalid_motion_idx
             )
 
@@ -749,12 +764,12 @@ class GenADHead(DETRHead):
                 # 此处的decoder就是TransformerDecoder
                 # 公式6
                 ca_motion_query = self.motion_map_decoder(  # [1, 1801, 256]
-                    query=ca_motion_query,
-                    key=map_query,
-                    value=map_query,
-                    query_pos=motion_pos,
-                    key_pos=map_pos,
-                    key_padding_mask=key_padding_mask)
+                    query=ca_motion_query,  # [1, 1801, 256]
+                    key=map_query,  # [1, 1801, 256]
+                    value=map_query,  # [1, 1801, 256]
+                    query_pos=motion_pos,  # [1, 1801, 256]
+                    key_pos=map_pos,  # [1, 1801, 256]
+                    key_padding_mask=key_padding_mask)  # [1801, 1]
             else:
                 ca_motion_query = motion_hs.permute(1, 0, 2).flatten(0, 1).unsqueeze(0)
 

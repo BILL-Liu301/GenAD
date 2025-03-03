@@ -82,6 +82,7 @@ def create_nuscenes_infos(root_path,
         raise ValueError('unknown')
 
     # filter existing scenes.
+    # 找出可用的场景，主要是根据是否有本地数据进行判断
     available_scenes = get_available_scenes(nusc)
     available_scene_names = [s['name'] for s in available_scenes]
     train_scenes = list(
@@ -100,11 +101,10 @@ def create_nuscenes_infos(root_path,
     if test:
         print('test scene: {}'.format(len(train_scenes)))
     else:
-        print('train scene: {}, val scene: {}'.format(
-            len(train_scenes), len(val_scenes)))
+        print('train scene: {}, val scene: {}'.format(len(train_scenes), len(val_scenes)))
 
-    train_nusc_infos, val_nusc_infos = _fill_trainval_infos(
-        nusc, nusc_can_bus, train_scenes, val_scenes, test, max_sweeps=max_sweeps)
+    # 为train和val提取数据
+    train_nusc_infos, val_nusc_infos = _fill_trainval_infos(nusc, nusc_can_bus, train_scenes, val_scenes, test, max_sweeps=max_sweeps)
 
     metadata = dict(version=version)
     if test:
@@ -244,15 +244,20 @@ def _fill_trainval_infos(nusc,
         lidar_path, boxes, _ = nusc.get_sample_data(lidar_token)
 
         mmcv.check_file_exist(lidar_path)
+        # 获取sample的can_bus信息
         can_bus = _get_can_bus_info(nusc, nusc_can_bus, sample)
         fut_valid_flag = True
+
+        # 将sample深度拷贝为test_sample
         test_sample = copy.deepcopy(sample)
+        # 找到6帧之后的数据，作为test_sample
         for i in range(fut_ts):
             if test_sample['next'] != '':
                 test_sample = nusc.get('sample', test_sample['next'])
             else:
                 fut_valid_flag = False
-        ##
+
+        # 记录信息
         info = {
             'lidar_path': lidar_path,
             'token': sample['token'],
@@ -272,6 +277,7 @@ def _fill_trainval_infos(nusc,
             'map_location': map_location
         }
 
+        # 当 sample['next'] == '' 时，表示当前帧为最后一帧，需要将 frame_idx 重置为 0
         if sample['next'] == '':
             frame_idx = 0
         else:
@@ -285,6 +291,7 @@ def _fill_trainval_infos(nusc,
         e2g_r_mat = Quaternion(e2g_r).rotation_matrix
 
         # obtain 6 image's information per frame
+        # 获取每帧数据的6个相机的数据
         camera_types = [
             'CAM_FRONT',
             'CAM_FRONT_RIGHT',
@@ -296,65 +303,70 @@ def _fill_trainval_infos(nusc,
         for cam in camera_types:
             cam_token = sample['data'][cam]
             cam_path, _, cam_intrinsic = nusc.get_sample_data(cam_token)
-            cam_info = obtain_sensor2top(nusc, cam_token, l2e_t, l2e_r_mat,
-                                         e2g_t, e2g_r_mat, cam)
+            cam_info = obtain_sensor2top(
+                nusc, cam_token, l2e_t, l2e_r_mat,
+                e2g_t, e2g_r_mat, cam
+            )
             cam_info.update(cam_intrinsic=cam_intrinsic)
             info['cams'].update({cam: cam_info})
 
         # obtain sweeps for a single key-frame
+        # 获取当前数据的前几帧雷达数据（sweeps），并将这些数据存储在 sweeps 列表中
         sd_rec = nusc.get('sample_data', sample['data']['LIDAR_TOP'])
         sweeps = []
         while len(sweeps) < max_sweeps:
             if not sd_rec['prev'] == '':
-                sweep = obtain_sensor2top(nusc, sd_rec['prev'], l2e_t,
-                                          l2e_r_mat, e2g_t, e2g_r_mat, 'lidar')
+                sweep = obtain_sensor2top(
+                    nusc, sd_rec['prev'], l2e_t,
+                    l2e_r_mat, e2g_t, e2g_r_mat, 'lidar'
+                )
                 sweeps.append(sweep)
                 sd_rec = nusc.get('sample_data', sd_rec['prev'])
             else:
                 break
         info['sweeps'] = sweeps
+
         # obtain annotation
+        # 获取所有被标注物体的信息，包括物体属性和位姿信息
         if not test:
-            annotations = [
-                nusc.get('sample_annotation', token)
-                for token in sample['anns']
-            ]
+            # 获取标注物信息
+            annotations = [nusc.get('sample_annotation', token) for token in sample['anns']]
+
+            # 获取物体的速度和有效性
+            velocity = np.array([nusc.box_velocity(token)[:2] for token in sample['anns']])
+            valid_flag = np.array([(anno['num_lidar_pts'] + anno['num_radar_pts']) > 0 for anno in annotations], dtype=bool).reshape(-1)
+
+            # 从boxes中获取定位、尺寸和姿态
             locs = np.array([b.center for b in boxes]).reshape(-1, 3)
             dims = np.array([b.wlh for b in boxes]).reshape(-1, 3)
-            rots = np.array([b.orientation.yaw_pitch_roll[0]
-                             for b in boxes]).reshape(-1, 1)
-            velocity = np.array(
-                [nusc.box_velocity(token)[:2] for token in sample['anns']])
-            valid_flag = np.array(
-                [(anno['num_lidar_pts'] + anno['num_radar_pts']) > 0
-                 for anno in annotations],
-                dtype=bool).reshape(-1)
+            rots = np.array([b.orientation.yaw_pitch_roll[0] for b in boxes]).reshape(-1, 1)
+
             # convert velo from global to lidar
+            # 将物体的全局速度转化为雷达坐标系下的速度，个人理解为将ego设定为静止，计算其他物体的相对速度
             for i in range(len(boxes)):
                 velo = np.array([*velocity[i], 0.0])
-                velo = velo @ np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(
-                    l2e_r_mat).T
+                velo = velo @ np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(l2e_r_mat).T
                 velocity[i] = velo[:2]
-
+            
+            # 获取物体的名称
             names = [b.name for b in boxes]
             for i in range(len(names)):
                 if names[i] in NuScenesDataset.NameMapping:
+                    # 规整名字，比如说，'human.pedestrian.adult' -> 'pedestrian'
                     names[i] = NuScenesDataset.NameMapping[names[i]]
             names = np.array(names)
+
             # we need to convert rot to SECOND format.
-            gt_boxes = np.concatenate([locs, dims, -rots - np.pi / 2], axis=1)
-            assert len(gt_boxes) == len(
-                annotations), f'{len(gt_boxes)}, {len(annotations)}'
+            gt_boxes = np.concatenate([locs, dims, -rots - np.pi / 2], axis=1)  # [num_box, 7]
+            assert len(gt_boxes) == len(annotations), f'{len(gt_boxes)}, {len(annotations)}'
             
             # get future coords for each box
-            # [num_box, fut_ts*2]
             num_box = len(boxes)
-            gt_fut_trajs = np.zeros((num_box, fut_ts, 2))
-            gt_fut_yaw = np.zeros((num_box, fut_ts))
-            gt_fut_masks = np.zeros((num_box, fut_ts))
-            gt_boxes_yaw = -(gt_boxes[:,6] + np.pi / 2)
-            # agent lcf feat (x, y, yaw, vx, vy, width, length, height, type)
-            agent_lcf_feat = np.zeros((num_box, 9))
+            gt_fut_trajs = np.zeros((num_box, fut_ts, 2))  # [num_box, fut_ts, 2]
+            gt_fut_yaw = np.zeros((num_box, fut_ts))  # [num_box, fut_ts]
+            gt_fut_masks = np.zeros((num_box, fut_ts))  # [num_box, fut_ts]
+            gt_boxes_yaw = -(gt_boxes[:,6] + np.pi / 2)  # -(-rots - np.pi / 2 + np.pi / 2) = rots
+            agent_lcf_feat = np.zeros((num_box, 9))  # [num_box, 9], (x, y, yaw, vx, vy, width, length, height, type)
             gt_fut_goal = np.zeros((num_box))
             for i, anno in enumerate(annotations):
                 cur_box = boxes[i]
@@ -364,6 +376,7 @@ def _fill_trainval_infos(nusc,
                 agent_lcf_feat[i, 3:5] = velocity[i]
                 agent_lcf_feat[i, 5:8] = anno['size'] # width,length,height
                 agent_lcf_feat[i, 8] = cat2idx[anno['category_name']] if anno['category_name'] in cat2idx.keys() else -1
+                # 获取未来fut_ts帧的状态
                 for j in range(fut_ts):
                     if cur_anno['next'] != '':
                         anno_next = nusc.get('sample_annotation', cur_anno['next'])
@@ -378,17 +391,22 @@ def _fill_trainval_infos(nusc,
                         box_next.rotate(Quaternion(cs_record['rotation']).inverse)
                         gt_fut_trajs[i, j] = box_next.center[:2] - cur_box.center[:2]
                         gt_fut_masks[i, j] = 1
-                        # add yaw diff
-                        _, _, box_yaw = quart_to_rpy([cur_box.orientation.x, cur_box.orientation.y,
-                                                      cur_box.orientation.z, cur_box.orientation.w])
-                        _, _, box_yaw_next = quart_to_rpy([box_next.orientation.x, box_next.orientation.y,
-                                                           box_next.orientation.z, box_next.orientation.w])
+                        # add yaw diff，将四元素转换为欧拉角
+                        _, _, box_yaw = quart_to_rpy([
+                            cur_box.orientation.x, cur_box.orientation.y,
+                            cur_box.orientation.z, cur_box.orientation.w
+                        ])
+                        _, _, box_yaw_next = quart_to_rpy([
+                            box_next.orientation.x, box_next.orientation.y,
+                            box_next.orientation.z, box_next.orientation.w
+                        ])
                         gt_fut_yaw[i, j] = box_yaw_next - box_yaw
                         cur_anno = anno_next
                         cur_box = box_next
                     else:
                         gt_fut_trajs[i, j:] = 0
                         break
+
                 # get agent goal
                 gt_fut_coords = np.cumsum(gt_fut_trajs[i], axis=-2)
                 coord_diff = gt_fut_coords[-1] - gt_fut_coords[0]
@@ -399,6 +417,7 @@ def _fill_trainval_infos(nusc,
                     gt_fut_goal[i] = box_mot_yaw // (np.pi / 4)  # 0-8: goal direction class
 
             # get ego history traj (offset format)
+            # 获取车辆历史轨迹
             ego_his_trajs = np.zeros((his_ts+1, 3))
             ego_his_trajs_diff = np.zeros((his_ts+1, 3))
             sample_cur = sample
@@ -428,6 +447,7 @@ def _fill_trainval_infos(nusc,
             ego_his_trajs = ego_his_trajs[1:] - ego_his_trajs[:-1]
 
             # get ego futute traj (offset format)
+            # 获取车辆未来轨迹
             ego_fut_trajs = np.zeros((fut_ts+1, 3))
             ego_fut_masks = np.zeros((fut_ts+1))
             sample_cur = sample
@@ -449,6 +469,7 @@ def _fill_trainval_infos(nusc,
             rot_mat = Quaternion(cs_record['rotation']).inverse.rotation_matrix
             ego_fut_trajs = np.dot(rot_mat, ego_fut_trajs.T).T
             # drive command according to final fut step offset from lcf
+            # 这里其实已经生成了指令
             if ego_fut_trajs[-1][0] >= 2:
                 command = np.array([1, 0, 0])  # Turn Right
             elif ego_fut_trajs[-1][0] <= -2:
@@ -528,7 +549,7 @@ def _fill_trainval_infos(nusc,
             info['gt_ego_his_trajs'] = ego_his_trajs[:, :2].astype(np.float32)
             info['gt_ego_fut_trajs'] = ego_fut_trajs[:, :2].astype(np.float32)
             info['gt_ego_fut_masks'] = ego_fut_masks[1:].astype(np.float32)
-            info['gt_ego_fut_cmd'] = command.astype(np.float32)
+            info['gt_ego_fut_cmd'] = command.astype(np.float32)  # 指令
             info['gt_ego_lcf_feat'] = ego_lcf_feat.astype(np.float32)
 
         if sample['scene_token'] in train_scenes:

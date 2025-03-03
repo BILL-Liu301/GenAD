@@ -140,7 +140,7 @@ class GenAD(MVXTwoStageDetector):
         outs = self.pts_bbox_head(pts_feats, img_metas, prev_bev,
                                   ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,
                                   gt_labels_3d=gt_labels_3d, gt_attr_labels=gt_attr_labels,
-                                  ego_fut_trajs=ego_fut_trajs)
+                                  ego_fut_trajs=ego_fut_trajs, ego_fut_cmd=ego_fut_cmd)
 
         # 计算loss
         loss_inputs = [

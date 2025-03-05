@@ -238,7 +238,9 @@ def main():
     if not distributed:
         # assert False
         model = MMDataParallel(model, device_ids=[0])
+        print('Test For Origin Dataset')
         outputs = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=False)
+        print('Test With Change Cmd')
         outputs_change_cmd = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=True)
     else:
         assert False
@@ -283,10 +285,10 @@ def main():
 
             # 打印了一对东西，反正我没看懂
             print('Result Nomal:')
-            results_dict = dataset.evaluate(outputs['bbox_results'], **eval_kwargs)
+            results_dict = dataset.evaluate(outputs['bbox_results'], 'results_nusc', **eval_kwargs)
             print('-' * 10)
             print('Result Change CMD:')
-            results_dict_change_cmd = dataset.evaluate(outputs['bbox_results_change_cmd'], **eval_kwargs)
+            results_dict_change_cmd = dataset.evaluate(outputs['bbox_results_change_cmd'], 'results_nusc_change_cmd', **eval_kwargs)
     
         # # # NOTE: record to json
         # json_path = args.json_dir

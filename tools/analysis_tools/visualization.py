@@ -1,3 +1,4 @@
+import time
 import sys
 sys.path.append('')
 import os
@@ -748,40 +749,31 @@ def render_sample_data(
 def parse_args():
     parser = argparse.ArgumentParser(description='Visualize VAD predictions')
     parser.add_argument('--result-path', help='inference result file path')
+    parser.add_argument('--result_change_cmd-path', help='inference result_change_cmd file path')
     parser.add_argument('--save-path', help='the dir to save visualization results')
     args = parser.parse_args()
 
     return args
 
-
-if __name__ == '__main__':
-    args = parse_args()
-    inference_result_path = args.result_path
-    out_path = args.save_path
-    bevformer_results = mmcv.load(inference_result_path)
-    sample_token_list = list(bevformer_results['results'].keys())
-
-    nusc = NuScenes(version='v1.0-mini', dataroot='/workspace/genad/GenAD/data/nuscenes', verbose=True)
-    
-    imgs = []
+def run(sample_token_list, results_, out_path, video_name):
     fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
-    video_path = osp.join(out_path, 'tiny.mp4')
+    video_path = osp.join(out_path, video_name)
     video = cv2.VideoWriter(video_path, fourcc, 10, (2933, 800), True)
+
     for id in tqdm(range(len(sample_token_list))):
-    # for id in tqdm(range(25)):
-        #3025 1140
-        # id = id + 3025
         mmcv.mkdir_or_exist(out_path)
-        render_sample_data(sample_token_list[id],
-                           pred_data=bevformer_results,
-                           out_path=out_path)
+        # 此处就会绘制BEV图
+        render_sample_data(
+            sample_token_list[id],
+            pred_data=results_,
+            out_path=out_path
+        )
         pred_path = osp.join(out_path, 'bev_pred.png')
         pred_img = cv2.imread(pred_path)
         os.remove(pred_path)
 
         sample_token = sample_token_list[id]
         sample = nusc.get('sample', sample_token)
-        # sample = data['results'][sample_token_list[0]][0]
         cams = [
             'CAM_FRONT_LEFT',
             'CAM_FRONT',
@@ -801,7 +793,7 @@ if __name__ == '__main__':
             elif sensor_modality == 'camera':
                 boxes = [Box(record['translation'], record['size'], Quaternion(record['rotation']),
                             name=record['detection_name'], token='predicted') for record in
-                        bevformer_results['results'][sample_token]]
+                        results_['results'][sample_token]]
                 data_path, boxes_pred, camera_intrinsic = get_predicted_data(sample_data_token,
                                                                             box_vis_level=BoxVisibility.ANY,
                                                                             pred_anns=boxes)
@@ -820,8 +812,8 @@ if __name__ == '__main__':
 
                     # get plan traj [x,y,z,w] quaternion, w=1
                     # we set z=-1 to get points near the ground in lidar coord system
-                    plan_cmd = np.argmax(bevformer_results['plan_results'][sample_token][1][0,0,0])
-                    plan_traj = bevformer_results['plan_results'][sample_token][0][plan_cmd]
+                    plan_cmd = np.argmax(results_['plan_results'][sample_token][1][0,0,0])
+                    plan_traj = results_['plan_results'][sample_token][0][plan_cmd]
                     plan_traj[abs(plan_traj) < 0.01] = 0.0
                     plan_traj = plan_traj.cumsum(axis=0)
 
@@ -905,7 +897,7 @@ if __name__ == '__main__':
             else:
                 raise ValueError("Error: Unknown sensor modality!")
 
-        plan_cmd = np.argmax(bevformer_results['plan_results'][sample_token][1][0,0,0])
+        plan_cmd = np.argmax(results_['plan_results'][sample_token][1][0,0,0])
         cmd_list = ['Turn Right', 'Turn Left', 'Go Straight']
         plan_cmd_str = cmd_list[plan_cmd]
         pred_img = cv2.copyMakeBorder(pred_img, 10, 10, 10, 10, cv2.BORDER_CONSTANT, None, value = 0)
@@ -935,7 +927,7 @@ if __name__ == '__main__':
 
         video.write(vis_img)
 
-    import time
+    # 等待视频生成完毕
     while True:
         if os.path.exists(video_path):
             break
@@ -943,3 +935,24 @@ if __name__ == '__main__':
         time.sleep(1)
     video.release()
     cv2.destroyAllWindows()
+
+if __name__ == '__main__':
+    args = parse_args()
+    inference_result_path = args.result_path
+    inference_resule_change_cmd_path = args.result_change_cmd_path
+    out_path = args.save_path
+
+    # 获取原始结果和改变了指令的结果
+    results_origin = mmcv.load(inference_result_path)
+    results_change_cmd = mmcv.load(inference_resule_change_cmd_path)
+
+    # results_origin和results_change_cmd中result的key是一样的
+    assert list(results_origin['results'].keys()) == list(results_change_cmd['results'].keys())
+    sample_token_list = list(results_origin['results'].keys())
+
+    nusc = NuScenes(version='v1.0-mini', dataroot='/workspace/genad/GenAD/data/nuscenes', verbose=True)
+    
+    print('Visualizing for resuls_origin')
+    run(sample_token_list, results_origin, out_path, 'results_origin.mp4')
+    print('Visualizing for resuls_change_cmd')
+    run(sample_token_list, results_change_cmd, out_path, 'results_change_cmd.mp4')

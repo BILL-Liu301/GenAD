@@ -1446,7 +1446,7 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
         else:
             print(f'{self.map_ann_file} exist, not update')
 
-    def _format_bbox(self, results, jsonfile_prefix=None, score_thresh=0.2):
+    def _format_bbox(self, results, file_name, jsonfile_prefix=None, score_thresh=0.2):
         """Convert the results to the standard format.
 
         Args:
@@ -1556,14 +1556,15 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
 
         mmcv.mkdir_or_exist(jsonfile_prefix)
         if self.use_pkl_result:
-            res_path = osp.join(jsonfile_prefix, 'results_nusc.pkl')
+            res_path = osp.join(jsonfile_prefix, f'{file_name}.pkl')
         else:
+            assert False
             res_path = osp.join(jsonfile_prefix, 'results_nusc.json')
         print('Results writes to', res_path)
         mmcv.dump(nusc_submissions, res_path)
         return res_path
 
-    def format_results(self, results, jsonfile_prefix=None):
+    def format_results(self, results, file_name, jsonfile_prefix=None):
         """Format the results to json (standard format for COCO evaluation).
 
         Args:
@@ -1600,6 +1601,7 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
         # this is a workaround to enable evaluation of both formats on nuScenes
         # refer to https://github.com/open-mmlab/mmdetection3d/issues/449
         if not ('pts_bbox' in results[0] or 'img_bbox' in results[0]):
+            assert False
             result_files = self._format_bbox(results, jsonfile_prefix)
         else:
             # should take the inner dict out of 'pts_bbox' or 'img_bbox' dict
@@ -1610,8 +1612,7 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
                 print(f'\nFormating bboxes of {name}')
                 results_ = [out[name] for out in results]
                 tmp_file_ = osp.join(jsonfile_prefix, name)
-                result_files.update(
-                    {name: self._format_bbox(results_, tmp_file_)})
+                result_files.update({name: self._format_bbox(results_, file_name, jsonfile_prefix=tmp_file_)})
         return result_files, tmp_dir
 
     def _evaluate_single(self,
@@ -1733,6 +1734,7 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
     
     def evaluate(self,
                  results,
+                 file_name,
                  metric='bbox',
                  map_metric='chamfer',
                  logger=None,
@@ -1812,7 +1814,7 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
             metric_dict[k] = metric_dict[k] / num_valid
             print("{}:{}".format(k, metric_dict[k]))
 
-        result_files, tmp_dir = self.format_results(results, jsonfile_prefix)
+        result_files, tmp_dir = self.format_results(results, file_name, jsonfile_prefix)
 
         if isinstance(result_files, dict):
             results_dict = dict()

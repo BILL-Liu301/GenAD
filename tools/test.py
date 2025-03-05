@@ -238,9 +238,9 @@ def main():
     if not distributed:
         # assert False
         model = MMDataParallel(model, device_ids=[0])
-        print('Test For Origin Dataset')
+        print('Testing For Origin Dataset ...')
         outputs = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=False)
-        print('Test With Change Cmd')
+        print('Testing With Change Cmd ...')
         outputs_change_cmd = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=True)
     else:
         assert False
@@ -267,7 +267,8 @@ def main():
                 mmcv.dump(outputs['bbox_results'], args.out)
         kwargs = {} if args.eval_options is None else args.eval_options
         kwargs['jsonfile_prefix'] = osp.join(
-            'test', args.config.split('/')[-1].split('.')[-2], time.ctime().replace(' ', '_').replace(':', '_')
+            # 'test', args.config.split('/')[-1].split('.')[-2], time.ctime().replace(' ', '_').replace(':', '_')
+            'test', args.config.split('/')[-1].split('.')[-2], 'results'
         )
         if args.format_only:
             assert False
@@ -284,11 +285,16 @@ def main():
             eval_kwargs.update(dict(metric=args.eval, **kwargs))
 
             # 打印了一对东西，反正我没看懂
-            print('Result Nomal:')
-            results_dict = dataset.evaluate(outputs['bbox_results'], 'results_nusc', **eval_kwargs)
-            print('-' * 10)
-            print('Result Change CMD:')
-            results_dict_change_cmd = dataset.evaluate(outputs['bbox_results_change_cmd'], 'results_nusc_change_cmd', **eval_kwargs)
+            # 所以我在此处抑制
+            import contextlib
+            import io
+            f = io.StringIO()
+            print('Dealing with Result ...')
+            with contextlib.redirect_stdout(f):
+                results_dict = dataset.evaluate(outputs['bbox_results'], 'results_nusc', **eval_kwargs)
+            print('Dealing with Result Change CMD ...')
+            with contextlib.redirect_stdout(f):
+                results_dict_change_cmd = dataset.evaluate(outputs['bbox_results_change_cmd'], 'results_nusc_change_cmd', **eval_kwargs)
     
         # # # NOTE: record to json
         # json_path = args.json_dir

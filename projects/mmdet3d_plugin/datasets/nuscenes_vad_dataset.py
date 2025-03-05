@@ -1468,7 +1468,8 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
         plan_annos = {}
 
         print('Start to convert detection format...')
-        for sample_id, det in enumerate(mmcv.track_iter_progress(results)):
+        # for sample_id, det in enumerate(mmcv.track_iter_progress(results)):
+        for sample_id, det in enumerate(results):
             annos = []
             boxes = output_to_nusc_box(det)
             sample_token = self.data_infos[sample_id]['token']
@@ -1606,13 +1607,22 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
         else:
             # should take the inner dict out of 'pts_bbox' or 'img_bbox' dict
             result_files = dict()
+            result_input = {}
             for name in results[0]:
-                if name == 'metric_results':
-                    continue
-                print(f'\nFormating bboxes of {name}')
-                results_ = [out[name] for out in results]
-                tmp_file_ = osp.join(jsonfile_prefix, name)
-                result_files.update({name: self._format_bbox(results_, file_name, jsonfile_prefix=tmp_file_)})
+                if name == 'pts_bbox':
+                    print(f'\nFormating bboxes of {name}')
+                    results_ = [out[name] for out in results]
+                    tmp_file_ = osp.join(jsonfile_prefix, name)
+                    result_files.update({name: self._format_bbox(results_, file_name, jsonfile_prefix=tmp_file_)})
+                elif name == 'input':
+                    result_input.update({name: [out[name] for out in results]})
+                else:
+                    pass
+            
+            # 将input信息也保存下来
+            mmcv.mkdir_or_exist(jsonfile_prefix)
+            res_path = osp.join(jsonfile_prefix, f'{file_name}_input.pkl')
+            mmcv.dump(result_input, res_path)
         return result_files, tmp_dir
 
     def _evaluate_single(self,

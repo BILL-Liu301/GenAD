@@ -238,8 +238,10 @@ def main():
     if not distributed:
         # assert False
         model = MMDataParallel(model, device_ids=[0])
-        outputs = single_gpu_test(model, data_loader, args.show, args.show_dir)
+        outputs = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=False)
+        outputs_change_cmd = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=True)
     else:
+        assert False
         model = MMDistributedDataParallel(
             model.cuda(),
             device_ids=[torch.cuda.current_device()],
@@ -249,8 +251,10 @@ def main():
 
     tmp = {}
     tmp['bbox_results'] = outputs
+    tmp['bbox_results_change_cmd'] = outputs_change_cmd
     outputs = tmp
     rank, _ = get_dist_info()
+    assert rank == 0
     if rank == 0:
         if args.out:
             print(f'\nwriting results to {args.out}')
@@ -260,9 +264,11 @@ def main():
             else:
                 mmcv.dump(outputs['bbox_results'], args.out)
         kwargs = {} if args.eval_options is None else args.eval_options
-        kwargs['jsonfile_prefix'] = osp.join('test', args.config.split(
-            '/')[-1].split('.')[-2], time.ctime().replace(' ', '_').replace(':', '_'))
+        kwargs['jsonfile_prefix'] = osp.join(
+            'test', args.config.split('/')[-1].split('.')[-2], time.ctime().replace(' ', '_').replace(':', '_')
+        )
         if args.format_only:
+            assert False
             dataset.format_results(outputs['bbox_results'], **kwargs)
 
         if args.eval:
@@ -275,7 +281,12 @@ def main():
                 eval_kwargs.pop(key, None)
             eval_kwargs.update(dict(metric=args.eval, **kwargs))
 
-            print(dataset.evaluate(outputs['bbox_results'], **eval_kwargs))
+            # 打印了一对东西，反正我没看懂
+            print('Result Nomal:')
+            results_dict = dataset.evaluate(outputs['bbox_results'], **eval_kwargs)
+            print('-' * 10)
+            print('Result Change CMD:')
+            results_dict_change_cmd = dataset.evaluate(outputs['bbox_results_change_cmd'], **eval_kwargs)
     
         # # # NOTE: record to json
         # json_path = args.json_dir

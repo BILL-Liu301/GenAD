@@ -761,7 +761,7 @@ if __name__ == '__main__':
     bevformer_results = mmcv.load(inference_result_path)
     sample_token_list = list(bevformer_results['results'].keys())
 
-    nusc = NuScenes(version='v1.0-trainval', dataroot='./data/nuscenes', verbose=True)
+    nusc = NuScenes(version='v1.0-mini', dataroot='/workspace/genad/GenAD/data/nuscenes', verbose=True)
     
     imgs = []
     fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
@@ -934,6 +934,12 @@ if __name__ == '__main__':
         vis_img = cv2.hconcat([cam_img, sample_img])
 
         video.write(vis_img)
-    
+
+    import time
+    while True:
+        if os.path.exists(video_path):
+            break
+        print(f'Waiting for {video_path} to be generated...')
+        time.sleep(1)
     video.release()
     cv2.destroyAllWindows()

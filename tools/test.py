@@ -210,8 +210,6 @@ def main():
         nonshuffler_sampler=cfg.data.nonshuffler_sampler,
     )
 
-
-
     # build the model and load checkpoint
     cfg.model.train_cfg = None
     model = build_model(cfg.model, test_cfg=cfg.get('test_cfg'))

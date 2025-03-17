@@ -72,6 +72,10 @@ def create_nuscenes_infos(root_path,
     if version == 'v1.0-trainval':
         train_scenes = splits.train
         val_scenes = splits.val
+        # 手动减少数据量
+        import random
+        train_scenes = random.sample(train_scenes, 100)
+        val_scenes = random.sample(val_scenes, 50)
     elif version == 'v1.0-test':
         train_scenes = splits.test
         val_scenes = []

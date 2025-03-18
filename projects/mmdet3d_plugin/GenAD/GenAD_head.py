@@ -254,8 +254,8 @@ class GenADHead(DETRHead):
         super(GenADHead, self).__init__(*args, transformer=transformer, **kwargs)
         self.code_weights = nn.Parameter(torch.tensor(self.code_weights, requires_grad=False), requires_grad=False)
         self.map_code_weights = nn.Parameter(torch.tensor(self.map_code_weights, requires_grad=False), requires_grad=False)
-        self.cmd_query = nn.Embedding(3, self.embed_dims)
-        self.cmd_pos = nn.Embedding(3, self.embed_dims)
+        self.cmd_query = nn.Embedding(5, self.embed_dims)
+        self.cmd_pos = nn.Embedding(5, self.embed_dims)
         self.cmd_query_mlp = nn.Linear(self.embed_dims * 2, self.embed_dims)
         self.cmd_pos_mlp = nn.Linear(self.embed_dims * 2, self.embed_dims)
 
@@ -665,7 +665,7 @@ class GenADHead(DETRHead):
 
         # motion query
         if self.motion_decoder is not None:
-            batch_size, num_agent = outputs_coords_bev[-1].shape[:2]  # [1, 300, 2]
+            batch_size, num_agent = outputs_coords_bev[-1].shape[:2]  # [1, 300, 2]，历史数据对应的最后一帧的bev特征坐标系
             # motion_query
             motion_query = hs[-1].permute(1, 0, 2)  # [A, B, D]  [3, 1, 300, 256] -> [1, 300, 256] -> [300, 1, 256]
             mode_query = self.motion_mode_query.weight  # [fut_mode, D]  [6, 256]
@@ -680,10 +680,12 @@ class GenADHead(DETRHead):
                 motion_pos = motion_pos.unsqueeze(2).repeat(1, 1, self.fut_mode, 1).flatten(1, 2)  # [1, 300, 256] -> [1, 300, 1, 256] -> [1, 300, 6, 256] -> [1, 1800, 256]
                 motion_pos = motion_pos.permute(1, 0, 2)  # [M, B, D]  [1800, 1, 256]
             else:
+                assert False
                 motion_pos = None
 
             # 尚未传入self.motion_det_score
             if self.motion_det_score is not None:
+                assert False
                 motion_score = outputs_classes[-1]
                 max_motion_score = motion_score.max(dim=-1)[0]
                 invalid_motion_idx = max_motion_score < self.motion_det_score  # [B, A]
@@ -775,9 +777,10 @@ class GenADHead(DETRHead):
 
             ########################################
             # generator for planning & motion
-            current_states = torch.cat([
+            current_states = torch.cat([  # [1, 1801, 512]
                 motion_hs.permute(1, 0, 2),  # [1801, 1, 256] -> [1, 1801, 256]
-                ca_motion_query.reshape(batch_size, -1, self.embed_dims)  # [1, 1801, 256] -> [1, 1801, 256]
+                # ca_motion_query.reshape(batch_size, -1, self.embed_dims)  # [1, 1801, 256] -> [1, 1801, 256]
+                ca_motion_query  # [1, 1801, 256]
             ], dim=2)
             distribution_comp = {}
             # states = torch.randn((2, 1, 64, 200, 200), device=motion_hs.device)
@@ -796,29 +799,39 @@ class GenADHead(DETRHead):
                 # present_state = states[:, :1].contiguous()
                 if self.probabilistic:
                     # Do probabilistic computation
-                    sample, output_distribution = self.distribution_forward(
+                    sample, output_distribution = self.distribution_forward(  # [1, 32, 1801], dict
                         current_states, future_distribution_inputs, noise
                     )
-                    distribution_comp = {**distribution_comp, **output_distribution}
+                    # distribution_comp = {**distribution_comp, **output_distribution}
+                    distribution_comp = output_distribution
+            else:
+                assert False
 
             # 2. predict future state from distribution
             hidden_states = current_states
-            states_hs, future_states_hs = self.future_states_predict(
-                batch_size=batch_size,
-                sample=sample,
-                hidden_states=hidden_states,
-                current_states=current_states
+            states_hs, future_states_hs = self.future_states_predict(  # [6, 1, 1801, 1024], [6, 1, 1801, 512]
+                batch_size=batch_size,  # 1
+                sample=sample,  # [1, 32, 1801]
+                hidden_states=hidden_states,  # [1, 1801, 512]
+                current_states=current_states  # [1, 1801, 512]
             )
 
-            ego_query_hs = states_hs[:, :, self.agent_dim * self.fut_mode, :].unsqueeze(1).permute(0, 2, 1, 3)
-            motion_query_hs = states_hs[:, :, 0:self.agent_dim * self.fut_mode, :]
-            motion_query_hs = motion_query_hs.reshape(self.fut_ts, batch_size, -1, self.fut_ts, motion_query_hs.shape[-1])
+            # 因为上面将ego的相关数据cat到了最后一个channel，此处其实就是进行分离
+            # ego_query_hs = states_hs[:, :, self.agent_dim * self.fut_mode, :]
+            ego_query_hs = states_hs[:, :, -1, :]  # [6, 1, 1024]
+            ego_query_hs = ego_query_hs.unsqueeze(1).permute(0, 2, 1, 3)  # [6, 1, 1024] -> [6, 1, 1, 1024] -> [6, 1, 1, 1024]
+            # motion_query_hs = states_hs[:, :, 0:self.agent_dim * self.fut_mode, :]
+            motion_query_hs = states_hs[:, :, :-1, :]  # [6, 1, 1800, 1024]
+            motion_query_hs = motion_query_hs.reshape(self.fut_ts, batch_size, -1, self.fut_ts, motion_query_hs.shape[-1])  # [6, 1, 300, 6, 1024]
             ego_fut_trajs_list = []
             motion_fut_trajs_list = []
+            # 遍历未来每一帧
             for i in range(self.fut_ts):
-                outputs_ego_trajs = self.ego_fut_decoder(ego_query_hs[i]).reshape(batch_size, self.ego_fut_mode, 2)
+                outputs_ego_trajs = self.ego_fut_decoder(  # [1, 3, 2]
+                    ego_query_hs[i]  # [1, 1, 1024]
+                ).reshape(batch_size, self.ego_fut_mode, 2)
                 ego_fut_trajs_list.append(outputs_ego_trajs)
-                outputs_agent_trajs = self.traj_branches[0](motion_query_hs[i])
+                outputs_agent_trajs = self.traj_branches[0](motion_query_hs[i])  # [1, 300, 6, 2]
                 motion_fut_trajs_list.append(outputs_agent_trajs)
 
             ego_trajs = torch.stack(ego_fut_trajs_list, dim=2)
@@ -1977,33 +1990,34 @@ class GenADHead(DETRHead):
 
         b = present_features.shape[0]
         c = present_features.shape[1]
-        present_mu, present_log_sigma = self.present_distribution(present_features)
 
+        # 根据经过一系列计算得到的特征，计算当前的分布
+        present_mu, present_log_sigma = self.present_distribution(  # [1, 1, 32], [1, 1, 32]
+            present_features  # [1, 1801, 512]
+        )
+
+        # 计算未来的分布
         future_mu, future_log_sigma = None, None
         if future_distribution_inputs is not None:
             # Concatenate future labels to z_t
             # future_features = future_distribution_inputs[:, 1:].contiguous().view(b, 1, -1, h, w)
-            future_features = torch.cat([present_features, future_distribution_inputs], dim=2)
+            future_features = torch.cat([  # [1, 1801, 524]
+                present_features,  # [1, 1801, 512]
+                future_distribution_inputs  # [1, 1801, 12]
+            ], dim=2)
             future_mu, future_log_sigma = self.future_distribution(future_features)
 
-        if noise is None:
-            if self.training:
-                noise = torch.randn_like(present_mu)
-            else:
-                noise = torch.randn_like(present_mu)
-        # print('################################')
-        # print('noise: ', noise)
-        # print('################################')
+        noise = torch.randn_like(present_mu) if noise is None else noise
         if self.training:
             mu = future_mu
             sigma = torch.exp(future_log_sigma)
         else:
             mu = present_mu
             sigma = torch.exp(present_log_sigma)
-        sample = mu + sigma * noise
+        sample = mu + sigma * noise  # [1, 1, 32]
 
         # Spatially broadcast sample to the dimensions of present_features
-        sample = sample.permute(0, 2, 1).expand(b, self.latent_dim, c)
+        sample = sample.permute(0, 2, 1).expand(b, self.latent_dim, c)  # [1, 1, 32] -> [1, 32, 1] -> [1, 32, 1801]
 
         output_distribution = {
             'present_mu': present_mu,
@@ -2029,9 +2043,16 @@ class GenADHead(DETRHead):
         agent_dim = 300
         veh_list = [0, 1, 3, 4]
         mapped_class_names = [
-            'car', 'truck', 'construction_vehicle', 'bus',
-            'trailer', 'barrier', 'motorcycle', 'bicycle',
-            'pedestrian', 'traffic_cone'
+            'car',
+            'truck', 
+            'construction_vehicle', # 忽略
+            'bus',
+            'trailer', 
+            'barrier', # 忽略
+            'motorcycle', # 忽略
+            'bicycle', # 忽略
+            'pedestrian', 
+            'traffic_cone' # 忽略
         ]
         ignore_list = ['construction_vehicle', 'barrier',
                        'traffic_cone', 'motorcycle', 'bicycle']
@@ -2043,15 +2064,23 @@ class GenADHead(DETRHead):
 
         gt_fut_trajs_bz_list = []
 
+        # 遍历所有batch
         for bz in range(batch_size):
             gt_fut_trajs_list = []
+
+            # 从每个batch中提取label数据
             gt_label = gt_labels_3d[bz]
             gt_attr_label = gt_attr_labels[bz]
+
+            # 遍历所有标签
             for i in range(gt_label.shape[0]):
+                # 当这个标签在[0, 1, 3, 4]中，直接修改为0，那么从mapped_class_names中提取出的就是car
                 gt_label[i] = 0 if gt_label[i] in veh_list else gt_label[i]
                 box_name = mapped_class_names[gt_label[i]]
+                # 忽略一些类别
                 if box_name in ignore_list:
                     continue
+
                 gt_fut_masks = gt_attr_label[i][self.fut_ts * 2:self.fut_ts * 3]
                 num_valid_ts = sum(gt_fut_masks == 1)
                 gt_fut_traj = gt_attr_label[i][:self.fut_ts * 2].reshape(-1, 2)
@@ -2093,17 +2122,32 @@ class GenADHead(DETRHead):
                   future_states_hs: the generative features predicted by generate model(VAE)
               """
 
-        future_prediction_input = sample.unsqueeze(0).expand(self.fut_ts, -1, -1, -1)
-        future_prediction_input = future_prediction_input.reshape(self.fut_ts, -1, self.latent_dim)
+        # 为未来每一帧都生成一个样本
+        future_prediction_input = sample.unsqueeze(0).expand(self.fut_ts, -1, -1, -1)  # [1, 32, 1801] -> [1, 1, 32, 1801] -> [6, 1, 32, 1801]
+        # 这里直接reshape了，感觉有点问题
+        # 在future_prediction_input中，future_prediction_input[0] == future_prediction_input[1] == ...   == future_prediction_input[-1]
+        # 这里分析future_prediction_input_0 = future_prediction_input[0, 0]
+        # 在future_prediction_input_0中，future_prediction_input_0[:, 0] == future_prediction_input_0[:, 1] == ... == future_prediction_input_0[:, -1]
+        # 在直接reshape之后，特征全被打乱
+        # 所以我认为，正确的代码应该是进行砖置，然后让1801这个channel和batch_size合并
+        # future_prediction_input = future_prediction_input.permute(0, 3, 1, 2).reshape(self.fut_ts, -1, self.latent_dim)  # [6, 1, 32, 1801] -> [6, 1801, 1, 32] -> [6, 1801, 32]
+        future_prediction_input = future_prediction_input.reshape(self.fut_ts, -1, self.latent_dim)  # [6, 1, 32, 1801] -> [6, 1801, 32]
 
-        hidden_state = hidden_states.reshape(self.layer_dim, -1, int(self.embed_dims / 2))
-        future_states = self.predict_model(future_prediction_input, hidden_state)
+        # 在输入的时候，hidden_states = current_states
+        # 同上，我感觉此处的reshape很奇怪
+        hidden_state = hidden_states.reshape(self.layer_dim, -1, int(self.embed_dims / 2))  # [1, 1801, 512] -> [4, 1801, 128]
+        
+        # 此处这个self.predict_model包含了GRU
+        future_states = self.predict_model(  # [6, 1801, 512]
+            future_prediction_input,  # [6, 1801, 32]
+            hidden_state  # [4, 1801, 128]
+        )
 
-        current_states_hs = current_states.unsqueeze(0).repeat(6, 1, 1, 1)
-        future_states_hs = future_states.reshape(self.fut_ts, batch_size, -1, future_states.shape[2])
+        current_states_hs = current_states.unsqueeze(0).repeat(self.fut_ts, 1, 1, 1)  # [1, 1801, 512] -> [1, 1, 1801, 512] -> [6, 1, 1801, 512]
+        future_states_hs = future_states.reshape(self.fut_ts, batch_size, -1, future_states.shape[2])  # [6, 1801, 512] -> [6, 1, 1801, 512]
 
         if self.with_cur:
-            states_hs = torch.cat((current_states_hs, future_states_hs), dim=-1)
+            states_hs = torch.cat((current_states_hs, future_states_hs), dim=-1)  # [6, 1, 1801, 1024]
         else:
             states_hs = future_states_hs
 

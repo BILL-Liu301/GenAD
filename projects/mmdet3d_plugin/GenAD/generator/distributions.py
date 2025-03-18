@@ -31,14 +31,18 @@ class DistributionModule(nn.Module):
         )
 
         self.last_conv = nn.Sequential(
-            nn.AdaptiveAvgPool1d(1), nn.Conv1d(self.compress_dim, out_channels=2 * self.latent_dim, kernel_size=1)
+            nn.AdaptiveAvgPool1d(1), 
+            nn.Conv1d(self.compress_dim, out_channels=2 * self.latent_dim, kernel_size=1)
         )
 
     def forward(self, s_t):
-        encoding = self.encoder(s_t.permute(0, 2, 1))
-        mu_log_sigma = self.last_conv(encoding).permute(0, 2, 1)
-        mu = mu_log_sigma[:, :, :self.latent_dim]
-        log_sigma = mu_log_sigma[:, :, self.latent_dim:]
+        encoding = self.encoder(  # [1, xxx/2, 1801]
+            s_t.permute(0, 2, 1)  # [1, 1801, xxx] -> [1, xxx, 1801]
+        )
+        mu_log_sigma = self.last_conv(encoding).permute(0, 2, 1)  # [1, 1, 64]
+        assert mu_log_sigma.shape[-1] == 64 and self.latent_dim == 32
+        mu = mu_log_sigma[..., :self.latent_dim]  # [1, 1, 64] -> [1, 1, 32]
+        log_sigma = mu_log_sigma[..., self.latent_dim:]  # [1, 1, 64] -> [1, 1, 32]
 
         # clip the log_sigma value for numerical stability
         log_sigma = torch.clamp(log_sigma, self.min_log_sigma, self.max_log_sigma)

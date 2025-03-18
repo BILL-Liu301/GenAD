@@ -121,12 +121,10 @@ def create_nuscenes_infos(root_path,
         print('train sample: {}, val sample: {}'.format(
             len(train_nusc_infos), len(val_nusc_infos)))
         data = dict(infos=train_nusc_infos, metadata=metadata)
-        info_path = osp.join(out_path,
-                             '{}_infos_temporal_train.pkl'.format(info_prefix))
+        info_path = osp.join(out_path, '{}_infos_temporal_train.pkl'.format(info_prefix))
         mmcv.dump(data, info_path)
         data['infos'] = val_nusc_infos
-        info_val_path = osp.join(out_path,
-                                 '{}_infos_temporal_val.pkl'.format(info_prefix))
+        info_val_path = osp.join(out_path, '{}_infos_temporal_val.pkl'.format(info_prefix))
         mmcv.dump(data, info_val_path)
 
 
@@ -372,6 +370,7 @@ def _fill_trainval_infos(nusc,
             gt_boxes_yaw = -(gt_boxes[:,6] + np.pi / 2)  # -(-rots - np.pi / 2 + np.pi / 2) = rots
             agent_lcf_feat = np.zeros((num_box, 9))  # [num_box, 9], (x, y, yaw, vx, vy, width, length, height, type)
             gt_fut_goal = np.zeros((num_box))
+            # 遍历所有annotations
             for i, anno in enumerate(annotations):
                 cur_box = boxes[i]
                 cur_anno = anno
@@ -472,14 +471,33 @@ def _fill_trainval_infos(nusc,
             ego_fut_trajs = ego_fut_trajs - np.array(cs_record['translation'])
             rot_mat = Quaternion(cs_record['rotation']).inverse.rotation_matrix
             ego_fut_trajs = np.dot(rot_mat, ego_fut_trajs.T).T
+
+            # 至此，已经获取了ego和其他agent相对于ego的未来轨迹信息
+            # xy：x代表了左右偏移量，y代表了向前偏移量
+            # 接下来，需要根据这些信息生成比较合适的指令
+            # 左转：x < -2，
+            # 左偏转：-2 < x < -1
+            # 直行：-1 < x < 1
+            # 右偏转：1 < x < 2
+            # 右转：2 < x
+
             # drive command according to final fut step offset from lcf
-            # 这里其实已经生成了指令
-            if ego_fut_trajs[-1][0] >= 2:
-                command = np.array([1, 0, 0])  # Turn Right
-            elif ego_fut_trajs[-1][0] <= -2:
-                command = np.array([0, 1, 0])  # Turn Left
+            # 生成指令
+            x_end = ego_fut_trajs[-1, 0]
+            command = np.zeros(5)
+            if x_end <= -2:
+                command[0] = 1  # 左转
+            elif -2 < x_end <= -1:
+                command[1] = 1  # 左偏转
+            elif -1 < x_end < 1:
+                command[2] = 1  # 直行
+            elif 1 <= x_end < 2:
+                command[3] = 1  # 右偏转
+            elif 2 <= x_end:
+                command[4] = 1  # 右转
             else:
-                command = np.array([0, 0, 1])  # Go Straight
+                raise ValueError('x_end out of range')
+
             # offset from lcf -> per-step offset
             ego_fut_trajs = ego_fut_trajs[1:] - ego_fut_trajs[:-1]
 

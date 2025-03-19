@@ -121,13 +121,22 @@ class PredictModel(nn.Module):
     """
     def __init__(self, in_channels, out_channels, hidden_channels, num_layers):
         super().__init__()
-        self.gru = nn.GRU(input_size=in_channels, hidden_size=hidden_channels, num_layers=num_layers)
-        self.linear1 = nn.Linear(hidden_channels, hidden_channels*2)
-        self.linear2 = nn.Linear(hidden_channels*2, hidden_channels*4)
-        self.linear3 = nn.Linear(hidden_channels*4, out_channels)
+        self.gru = nn.GRU(
+            input_size=in_channels,  # 32
+            hidden_size=hidden_channels,  # 128
+            num_layers=num_layers,  # 4
+        )
+        self.linear1 = nn.Linear(hidden_channels, hidden_channels*2)  # 128 -> 256
+        self.linear2 = nn.Linear(hidden_channels*2, hidden_channels*4)  # 256 -> 512
+        self.linear3 = nn.Linear(hidden_channels*4, out_channels)  # 512 -> 512
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x , h):
+        # x: [6, 1801, 32]
+        # h: [4, 1801, 128]
+        # 1801意味着batch_size，6是sequence，4是num_layers，32是input_size，128是hidden_size
+        # 输入的时候，每个sequence都是一样的，相当于GRU的每帧的输入都是一样的，只靠h进行记忆的传递
+        # 此处的GRU可以直接换成LSTM
         x, h = self.gru(x, h)
         x = self.relu(self.linear1(x))
         x = self.relu(self.linear2(x))

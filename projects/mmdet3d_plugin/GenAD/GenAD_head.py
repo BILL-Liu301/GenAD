@@ -795,27 +795,31 @@ class GenADHead(DETRHead):
                 future_distribution_inputs = None
 
             # 1. model CVA distribution for state
-            if self.fut_ts > 0:
-                # present_state = states[:, :1].contiguous()
-                if self.probabilistic:
-                    # Do probabilistic computation
-                    sample, output_distribution = self.distribution_forward(  # [1, 32, 1801], dict
-                        current_states, future_distribution_inputs, noise
-                    )
-                    # distribution_comp = {**distribution_comp, **output_distribution}
-                    distribution_comp = output_distribution
-            else:
-                assert False
-
-            # 2. predict future state from distribution
-            hidden_states = current_states
+            # if self.fut_ts > 0:
+            #     # present_state = states[:, :1].contiguous()
+            #     if self.probabilistic:
+            #         # Do probabilistic computation
+            #         sample, output_distribution = self.distribution_forward(  # [1, 32, 1801], dict
+            #             current_states, future_distribution_inputs, noise
+            #         )
+            #         # distribution_comp = {**distribution_comp, **output_distribution}
+            #         distribution_comp = output_distribution
+            # else:
+            #     assert False
+            assert self.fut_ts > 0, "future time steps should be greater than 0. It is usually set to 6."
+            assert self.probabilistic, "probabilistic computation should be enabled."
+            # Do probabilistic computation
+            sample, distribution_comp = self.distribution_forward(  # [1, 32, 1801], dict
+                current_states, future_distribution_inputs, noise
+            )
             states_hs, future_states_hs = self.future_states_predict(  # [6, 1, 1801, 1024], [6, 1, 1801, 512]
                 batch_size=batch_size,  # 1
                 sample=sample,  # [1, 32, 1801]
-                hidden_states=hidden_states,  # [1, 1801, 512]
+                hidden_states=current_states,  # [1, 1801, 512]
                 current_states=current_states  # [1, 1801, 512]
             )
 
+            # 2. predict future state from distribution
             # 因为上面将ego的相关数据cat到了最后一个channel，此处其实就是进行分离
             # ego_query_hs = states_hs[:, :, self.agent_dim * self.fut_mode, :]
             ego_query_hs = states_hs[:, :, -1, :]  # [6, 1, 1024]
@@ -834,7 +838,7 @@ class GenADHead(DETRHead):
                 outputs_agent_trajs = self.traj_branches[0](motion_query_hs[i])  # [1, 300, 6, 2]
                 motion_fut_trajs_list.append(outputs_agent_trajs)
 
-            ego_trajs = torch.stack(ego_fut_trajs_list, dim=2)  # [1, 3, 6, 2]
+            ego_trajs = torch.stack(ego_fut_trajs_list, dim=2)  # [1, 3, 6, 2]，个人认为是直接预测了3个路径
             agent_trajs = torch.stack(motion_fut_trajs_list, dim=3)  # [1, 300, 6, 6, 2]
             agent_trajs = agent_trajs.reshape(batch_size, 1, self.agent_dim, self.fut_mode, -1)  # [1, 1, 300, 6, 6, 2]
 
@@ -1996,9 +2000,29 @@ class GenADHead(DETRHead):
             present_features  # [1, 1801, 512]
         )
 
+        # # 计算未来的分布
+        # future_mu, future_log_sigma = None, None
+        # if future_distribution_inputs is not None:
+        #     # Concatenate future labels to z_t
+        #     # future_features = future_distribution_inputs[:, 1:].contiguous().view(b, 1, -1, h, w)
+        #     future_features = torch.cat([  # [1, 1801, 524]
+        #         present_features,  # [1, 1801, 512]
+        #         future_distribution_inputs  # [1, 1801, 12]
+        #     ], dim=2)
+        #     future_mu, future_log_sigma = self.future_distribution(future_features)
+
+        # noise = torch.randn_like(present_mu) if noise is None else noise
+        # if self.training:
+        #     mu = future_mu
+        #     sigma = torch.exp(future_log_sigma)
+        # else:
+        #     mu = present_mu
+        #     sigma = torch.exp(present_log_sigma)
+        # sample = mu + sigma * noise  # [1, 1, 32]
+
         # 计算未来的分布
-        future_mu, future_log_sigma = None, None
         if future_distribution_inputs is not None:
+            # 训练阶段
             # Concatenate future labels to z_t
             # future_features = future_distribution_inputs[:, 1:].contiguous().view(b, 1, -1, h, w)
             future_features = torch.cat([  # [1, 1801, 524]
@@ -2006,14 +2030,13 @@ class GenADHead(DETRHead):
                 future_distribution_inputs  # [1, 1801, 12]
             ], dim=2)
             future_mu, future_log_sigma = self.future_distribution(future_features)
-
-        noise = torch.randn_like(present_mu) if noise is None else noise
-        if self.training:
-            mu = future_mu
-            sigma = torch.exp(future_log_sigma)
+            mu = future_mu  # [1, 1, 32]
+            sigma = torch.exp(future_log_sigma)  # [1, 1, 32]
         else:
-            mu = present_mu
-            sigma = torch.exp(present_log_sigma)
+            # 测试阶段
+            mu = present_mu  # [1, 1, 32]
+            sigma = torch.exp(present_log_sigma)  # [1, 1, 32]
+        noise = torch.randn_like(present_mu) if noise is None else noise
         sample = mu + sigma * noise  # [1, 1, 32]
 
         # Spatially broadcast sample to the dimensions of present_features

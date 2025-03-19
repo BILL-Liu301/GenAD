@@ -834,9 +834,9 @@ class GenADHead(DETRHead):
                 outputs_agent_trajs = self.traj_branches[0](motion_query_hs[i])  # [1, 300, 6, 2]
                 motion_fut_trajs_list.append(outputs_agent_trajs)
 
-            ego_trajs = torch.stack(ego_fut_trajs_list, dim=2)
-            agent_trajs = torch.stack(motion_fut_trajs_list, dim=3)
-            agent_trajs = agent_trajs.reshape(batch_size, 1, self.agent_dim, self.fut_mode, -1)
+            ego_trajs = torch.stack(ego_fut_trajs_list, dim=2)  # [1, 3, 6, 2]
+            agent_trajs = torch.stack(motion_fut_trajs_list, dim=3)  # [1, 300, 6, 6, 2]
+            agent_trajs = agent_trajs.reshape(batch_size, 1, self.agent_dim, self.fut_mode, -1)  # [1, 1, 300, 6, 6, 2]
 
         # future_hs = future_states_hs[:, :, 0:self.agent_dim * self.fut_mode, :].reshape(
         #     batch_size, self.agent_dim, self.fut_mode, -1)
@@ -844,13 +844,13 @@ class GenADHead(DETRHead):
         #     batch_size, self.agent_dim, self.fut_mode, -1)
         #
         # motion_cls_hs = torch.cat((future_hs, current_hs), dim=-1)
-        motion_cls_hs = torch.cat((future_states_hs[:, :, 0:self.agent_dim * self.fut_mode, :].
-                                   reshape(batch_size, self.agent_dim, self.fut_mode, -1),
-                                   current_states[:, 0:self.agent_dim * self.fut_mode, :].
-                                   reshape(batch_size, self.agent_dim, self.fut_mode, -1)), dim=-1)
+        motion_cls_hs = torch.cat((  # [1, 300, 6, 3584]
+            future_states_hs[:, :, 0:-1, :].reshape(batch_size, self.agent_dim, self.fut_mode, -1),  # [6, 1, 1800, 512] -> [1, 300, 6, 3072]
+            current_states[:, 0:self.agent_dim * self.fut_mode, :].reshape(batch_size, self.agent_dim, self.fut_mode, -1)  # [1, 1800, 512] -> [1, 300, 6, 512]
+        ), dim=-1)
 
-        outputs_traj_class = self.traj_cls_branches[0](motion_cls_hs)
-        outputs_trajs_classes.append(outputs_traj_class.squeeze(-1))
+        outputs_traj_class = self.traj_cls_branches[0](motion_cls_hs).squeeze(-1)  # [1, 300, 6]
+        outputs_trajs_classes.append(outputs_traj_class)
 
         map_outputs_classes = torch.stack(map_outputs_classes)
         map_outputs_coords = torch.stack(map_outputs_coords)

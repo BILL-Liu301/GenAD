@@ -526,7 +526,8 @@ class GenADHead(DETRHead):
                 gt_labels_3d=None,
                 gt_attr_labels=None,
                 ego_fut_trajs=None,
-                ego_fut_cmd=None
+                ego_fut_cmd=None,
+                img_feats_from_vlm=None
                 ):
         """Forward function.
         Args:

@@ -122,7 +122,9 @@ class GenAD(MVXTwoStageDetector):
                           ego_fut_masks=None,
                           ego_fut_cmd=None,
                           ego_lcf_feat=None,
-                          gt_attr_labels=None):
+                          gt_attr_labels=None,
+                          img_feats_from_vlm=None,
+                          descriptions_from_vlm=None):
         """Forward function'
         Args:
             pts_feats (list[torch.Tensor]): Features of point cloud branch
@@ -139,10 +141,13 @@ class GenAD(MVXTwoStageDetector):
         """
 
         # 此处的pts_feats其实就是img_feats，从6个相机中提取的特征，并根据特征进行模型的主体计算
-        outs = self.pts_bbox_head(pts_feats, img_metas, prev_bev,
-                                  ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,
-                                  gt_labels_3d=gt_labels_3d, gt_attr_labels=gt_attr_labels,
-                                  ego_fut_trajs=ego_fut_trajs, ego_fut_cmd=ego_fut_cmd)
+        outs = self.pts_bbox_head(
+            pts_feats, img_metas, prev_bev,
+            ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,
+            gt_labels_3d=gt_labels_3d, gt_attr_labels=gt_attr_labels,
+            ego_fut_trajs=ego_fut_trajs, ego_fut_cmd=ego_fut_cmd,
+            img_feats_from_vlm=img_feats_from_vlm
+        )
 
         # 计算loss
         loss_inputs = [
@@ -246,7 +251,7 @@ class GenAD(MVXTwoStageDetector):
         prev_bev = self.obtain_history_bev(prev_img, prev_img_metas) if len_queue > 1 else None  # 先self.extract_feat后self.pts_bbox_head
 
         # 从当前图像中获取当前特征信息
-        img_feats_from_vlm = self.clip_head(img)
+        img_feats_from_vlm, descriptions_from_vlm = self.clip_head(img)
 
         # 提取图像特征
         img_metas = [each[len_queue-1] for each in img_metas]
@@ -255,12 +260,15 @@ class GenAD(MVXTwoStageDetector):
         # 计算loss
         # 我觉得这里写的很抽象，包含了模型的主要架构和计算loss，但看起来就像是只计算loss
         losses = dict()
-        losses_pts = self.forward_pts_train(img_feats, gt_bboxes_3d, gt_labels_3d,
-                                            map_gt_bboxes_3d, map_gt_labels_3d, img_metas,
-                                            gt_bboxes_ignore, map_gt_bboxes_ignore, prev_bev,
-                                            ego_his_trajs=ego_his_trajs, ego_fut_trajs=ego_fut_trajs,
-                                            ego_fut_masks=ego_fut_masks, ego_fut_cmd=ego_fut_cmd,
-                                            ego_lcf_feat=ego_lcf_feat, gt_attr_labels=gt_attr_labels)
+        losses_pts = self.forward_pts_train(
+            img_feats, gt_bboxes_3d, gt_labels_3d,
+            map_gt_bboxes_3d, map_gt_labels_3d, img_metas,
+            gt_bboxes_ignore, map_gt_bboxes_ignore, prev_bev,
+            ego_his_trajs=ego_his_trajs, ego_fut_trajs=ego_fut_trajs,
+            ego_fut_masks=ego_fut_masks, ego_fut_cmd=ego_fut_cmd,
+            ego_lcf_feat=ego_lcf_feat, gt_attr_labels=gt_attr_labels,
+            img_feats_from_vlm=img_feats_from_vlm, descriptions_from_vlm=descriptions_from_vlm
+        )
 
         losses.update(losses_pts)
         return losses

@@ -124,7 +124,9 @@ class GenAD(MVXTwoStageDetector):
                           ego_lcf_feat=None,
                           gt_attr_labels=None,
                           img_feats_from_vlm=None,
-                          descriptions_from_vlm=None):
+                          descriptions_from_vlm=None,
+                          descriptions_gt=None
+                          ):
         """Forward function'
         Args:
             pts_feats (list[torch.Tensor]): Features of point cloud branch
@@ -216,7 +218,8 @@ class GenAD(MVXTwoStageDetector):
                       ego_fut_masks=None,
                       ego_fut_cmd=None,
                       ego_lcf_feat=None,
-                      gt_attr_labels=None
+                      gt_attr_labels=None,
+                      descriptions_gt=None,
                       ):
         """Forward training function.
         Args:
@@ -267,7 +270,7 @@ class GenAD(MVXTwoStageDetector):
             ego_his_trajs=ego_his_trajs, ego_fut_trajs=ego_fut_trajs,
             ego_fut_masks=ego_fut_masks, ego_fut_cmd=ego_fut_cmd,
             ego_lcf_feat=ego_lcf_feat, gt_attr_labels=gt_attr_labels,
-            img_feats_from_vlm=img_feats_from_vlm, descriptions_from_vlm=descriptions_from_vlm
+            img_feats_from_vlm=img_feats_from_vlm, descriptions_from_vlm=descriptions_from_vlm, descriptions_gt=descriptions_gt
         )
 
         losses.update(losses_pts)

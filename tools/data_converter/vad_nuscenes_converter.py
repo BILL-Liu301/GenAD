@@ -194,7 +194,7 @@ def _get_can_bus_info(nusc, nusc_can_bus, sample):
     return np.array(can_bus)
 
 
-def _fill_trainval_infos(nusc,
+def _fill_trainval_infos(nusc: NuScenes,
                          nusc_can_bus,
                          train_scenes,
                          val_scenes,

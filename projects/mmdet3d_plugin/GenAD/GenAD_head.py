@@ -1617,7 +1617,8 @@ class GenADHead(DETRHead):
              gt_attr_labels,
              gt_bboxes_ignore=None,
              map_gt_bboxes_ignore=None,
-             img_metas=None):
+             img_metas=None
+            ):
         """"Loss function.
         Args:
 

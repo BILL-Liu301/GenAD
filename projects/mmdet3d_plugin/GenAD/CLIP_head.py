@@ -18,11 +18,12 @@ class CLIPHead(nn.Module):
         self.text = {}
         self.query = {}
         self.fuse = nn.ModuleDict()
-        self.keys = ['traffic_light']
+        self.keys = ['traffic_light', 'traffic_condition']
 
-        # 红绿的特征
+        # 红绿的特征，traffic_light
+        key = self.keys[0]
         self.text.update({
-            'traffic_light': [
+            key: [
                 'a red traffic light',
                 'a green traffic light',
                 'a yellow traffic light',
@@ -30,10 +31,26 @@ class CLIPHead(nn.Module):
             ]
         })
         self.query.update({
-            'traffic_light': nn.Parameter(torch.randn(1, 1, self.feature_dim, dtype=self.dtype, device=device), requires_grad=True)
+            key: nn.Parameter(torch.randn(1, 1, self.feature_dim, dtype=self.dtype, device=device), requires_grad=True)
         })
         self.fuse.update({
-            'traffic_light': nn.Linear(self.feature_dim * 2, self.feature_dim, bias=False, dtype=self.dtype)
+            key: nn.Linear(self.feature_dim * 2, self.feature_dim, bias=False, dtype=self.dtype)
+        })
+
+        # 交通情况，traffic_condition
+        key = self.keys[1]
+        self.text.update({
+            key: [
+                'a smooth traffic',
+                'a normal traffic',
+                'a heavy traffic'
+            ]
+        })
+        self.query.update({
+            key: nn.Parameter(torch.randn(1, 1, self.feature_dim, dtype=self.dtype, device=device), requires_grad=True)
+        })
+        self.fuse.update({
+            key: nn.Linear(self.feature_dim * 2, self.feature_dim, bias=False, dtype=self.dtype)
         })
 
 
@@ -44,7 +61,7 @@ class CLIPHead(nn.Module):
         img_feats = self.model.encode_image(imgs_reshape)
         img_feats = img_feats.reshape(B, N, *img_feats.shape[1:])
 
-        img_feats_oup = {}
+        img_feats_oup = []
         descriptions_oup = {}
         for key in self.keys:
             img_feats_ = self.fuse_img_feats_query(img_feats, key)
@@ -57,8 +74,10 @@ class CLIPHead(nn.Module):
             # 特征之间交互
             descriptions_ = img_feats_ @ text_feats_.T
 
-            img_feats_oup.update({key: img_feats_})
+            img_feats_oup.append(img_feats_)
             descriptions_oup.update({key: descriptions_})
+
+        img_feats_oup = torch.cat(img_feats_oup, dim=1)
 
         return img_feats_oup, descriptions_oup
 

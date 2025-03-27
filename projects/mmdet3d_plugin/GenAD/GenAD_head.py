@@ -254,6 +254,26 @@ class GenADHead(DETRHead):
         super(GenADHead, self).__init__(*args, transformer=transformer, **kwargs)
         self.code_weights = nn.Parameter(torch.tensor(self.code_weights, requires_grad=False), requires_grad=False)
         self.map_code_weights = nn.Parameter(torch.tensor(self.map_code_weights, requires_grad=False), requires_grad=False)
+
+        # cross-attention，vlm提取的特征和motion_query之间
+        self.vlm_motion_mlp = nn.Linear(512, self.embed_dims)
+        self.vlm_motion_ca = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(
+                d_model=self.embed_dims,
+                nhead=4
+            ),
+            num_layers=2
+        )
+        self.vlm_map_ca = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(
+                d_model=self.embed_dims,
+                nhead=4,
+                batch_first=True
+            ),
+            num_layers=2
+        )
+
+        # cmd部分
         self.cmd_query = nn.Embedding(self.ego_fut_mode, self.embed_dims)
         self.cmd_pos = nn.Embedding(self.ego_fut_mode, self.embed_dims)
         self.cmd_query_mlp = nn.Linear(self.embed_dims * 2, self.embed_dims)
@@ -516,6 +536,7 @@ class GenADHead(DETRHead):
 
     # @auto_fp16(apply_to=('mlvl_feats'))
     @force_fp32(apply_to=('mlvl_feats', 'prev_bev'))
+    # @force_fp32(apply_to=('mlvl_feats', 'prev_bev', 'img_feats_from_vlm'))
     def forward(self,
                 mlvl_feats,
                 img_metas,
@@ -664,6 +685,10 @@ class GenADHead(DETRHead):
         # motion prediction
         # 重点关注对象
 
+        # 将从vlm中提取特征降低维度，进行对齐
+        feats_vlm = self.vlm_motion_mlp(img_feats_from_vlm.to(dtype))  # [B, n, 512] -> [B, n, 256]
+        feats_vlm = feats_vlm.permute(1, 0, 2)  # [n, B, 256]
+
         # motion query
         if self.motion_decoder is not None:
             batch_size, num_agent = outputs_coords_bev[-1].shape[:2]  # [1, 300, 2]，历史数据对应的最后一帧的bev特征坐标系
@@ -705,27 +730,33 @@ class GenADHead(DETRHead):
             ego_pos_emb = self.ego_agent_pos_mlp(ego_pos)  # [1, 1, 2] -> [1, 1, 256]
 
             # ego <-> agent Interaction
-            # motion_query = torch.cat([motion_query, ego_query], dim=0)  # [1801, 1, 256]
-            # motion_pos = torch.cat([motion_pos, ego_pos_emb], dim=0)  # [1801, 1, 256]
-            # 将指令进行特征提取
-            cmd = ego_fut_cmd.argmax().expand(1, 1)  # [1, 1, 3] -> [1, 1]
-            cmd_query = self.cmd_query(cmd)  # [1, 1, 256]
-            cmd_pos = self.cmd_pos(cmd)  # [1, 1, 256]
-            # cmd_motion_query和cmd_motion_pos分别与motion_query和motion_pos进行拼接并特征融合
-            cmd_ego_query = torch.cat([cmd_query, ego_query], dim=-1)  # [1, 1, 512]
-            cmd_ego_pos = torch.cat([cmd_pos, ego_pos_emb], dim=-1)  # [1, 1, 512]
-            cmd_ego_query = self.cmd_query_mlp(cmd_ego_query)  # [1, 1, 256]
-            cmd_ego_pos = self.cmd_pos_mlp(cmd_ego_pos)  # [1, 1, 256]
-            # 并入motion_query和motion_pos中
-            motion_query = torch.cat([motion_query, cmd_ego_query], dim=0)  # [1801, 1, 256]
-            motion_pos = torch.cat([motion_pos, cmd_ego_pos], dim=0)  # [1801, 1, 256]
+            motion_query = torch.cat([motion_query, ego_query], dim=0)  # [1801, 1, 256]
+            motion_pos = torch.cat([motion_pos, ego_pos_emb], dim=0)  # [1801, 1, 256]
+            # # 将指令进行特征提取
+            # cmd = ego_fut_cmd.argmax().expand(1, 1)  # [1, 1, 3] -> [1, 1]
+            # cmd_query = self.cmd_query(cmd)  # [1, 1, 256]
+            # cmd_pos = self.cmd_pos(cmd)  # [1, 1, 256]
+            # # cmd_motion_query和cmd_motion_pos分别与motion_query和motion_pos进行拼接并特征融合
+            # cmd_ego_query = torch.cat([cmd_query, ego_query], dim=-1)  # [1, 1, 512]
+            # cmd_ego_pos = torch.cat([cmd_pos, ego_pos_emb], dim=-1)  # [1, 1, 512]
+            # cmd_ego_query = self.cmd_query_mlp(cmd_ego_query)  # [1, 1, 256]
+            # cmd_ego_pos = self.cmd_pos_mlp(cmd_ego_pos)  # [1, 1, 256]
+            # # 并入motion_query和motion_pos中
+            # motion_query = torch.cat([motion_query, cmd_ego_query], dim=0)  # [1801, 1, 256]
+            # motion_pos = torch.cat([motion_pos, cmd_ego_pos], dim=0)  # [1801, 1, 256]
+
+            # 将motion_query和vlm提取的特征进行特征融合
+            motion_query_fuse = self.vlm_motion_ca(
+                motion_query,
+                feats_vlm
+            )
 
             # 此处的decoder就是TransformerDecoder
             # 公式5
             motion_hs = self.motion_decoder(  # [1801, 1, 256]
-                query=motion_query,  # [1801, 1, 256]
-                key=motion_query,  # [1801, 1, 256]
-                value=motion_query,  # [1801, 1, 256]
+                query=motion_query_fuse,  # [1801, 1, 256]
+                key=motion_query_fuse,  # [1801, 1, 256]
+                value=motion_query_fuse,  # [1801, 1, 256]
                 query_pos=motion_pos,  # [1801, 1, 256]
                 key_pos=motion_pos,  # [1801, 1, 256]
                 key_padding_mask=invalid_motion_idx
@@ -752,11 +783,11 @@ class GenADHead(DETRHead):
                     pe_normalization=self.pe_normalization, use_fix_pad=True
                 )
                 map_query = map_query.permute(1, 0, 2)  # [P, B*M, D]  [1, 1801, 256]
-                ca_motion_query = motion_hs.permute(1, 0, 2).flatten(0, 1).unsqueeze(0)  # [1801, 1, 256] -> [1, 1801, 256] -> [1801, 256] -> [1, 1801, 256]
+                sa_motion_query = motion_hs.permute(1, 0, 2).flatten(0, 1).unsqueeze(0)  # [1801, 1, 256] -> [1, 1801, 256] -> [1801, 256] -> [1, 1801, 256]
 
                 # position encoding
                 if self.use_pe:
-                    (num_query, batch) = ca_motion_query.shape[:2]  # [1, 1801, 256]
+                    (num_query, batch) = sa_motion_query.shape[:2]  # [1, 1801, 256]
                     motion_pos = torch.zeros((num_query, batch, 2), device=motion_hs.device)  # [1, 1801, 2]
                     motion_pos = self.pos_mlp(motion_pos)  # [1, 1801, 2] -> [1, 1801, 256]
                     map_pos = map_pos.permute(1, 0, 2)  # [1801, 1, 2] -> [1, 1801, 2]
@@ -764,16 +795,23 @@ class GenADHead(DETRHead):
                 else:
                     motion_pos, map_pos = None, None
 
+                # 将map_query和vlm提取的特征进行特征融合
+                map_query_fuse = self.vlm_map_ca(
+                    map_query,
+                    feats_vlm
+                )
+
                 # 此处的decoder就是TransformerDecoder
                 # 公式6
                 ca_motion_query = self.motion_map_decoder(  # [1, 1801, 256]
-                    query=ca_motion_query,  # [1, 1801, 256]
-                    key=map_query,  # [1, 1801, 256]
-                    value=map_query,  # [1, 1801, 256]
+                    query=sa_motion_query,  # [1, 1801, 256]
+                    key=map_query_fuse,  # [1, 1801, 256]
+                    value=map_query_fuse,  # [1, 1801, 256]
                     query_pos=motion_pos,  # [1, 1801, 256]
                     key_pos=map_pos,  # [1, 1801, 256]
                     key_padding_mask=key_padding_mask)  # [1801, 1]
             else:
+                assert False
                 ca_motion_query = motion_hs.permute(1, 0, 2).flatten(0, 1).unsqueeze(0)
 
             ########################################

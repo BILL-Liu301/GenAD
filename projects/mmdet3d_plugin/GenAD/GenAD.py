@@ -11,6 +11,7 @@ from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
 from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 from projects.mmdet3d_plugin.GenAD.planner.metric_stp3 import PlanningMetric
 
+from .CLIP_head import CLIPHead
 
 @DETECTORS.register_module()
 class GenAD(MVXTwoStageDetector):
@@ -50,6 +51,7 @@ class GenAD(MVXTwoStageDetector):
         self.fut_ts = fut_ts
         self.fut_mode = fut_mode
         self.valid_fut_ts = pts_bbox_head['valid_fut_ts']
+        self.clip_head = CLIPHead("cuda")
 
         # temporal
         self.video_test_mode = video_test_mode
@@ -242,6 +244,9 @@ class GenAD(MVXTwoStageDetector):
         # 从历史图像数据中提取bev信息
         prev_img_metas = copy.deepcopy(img_metas)
         prev_bev = self.obtain_history_bev(prev_img, prev_img_metas) if len_queue > 1 else None  # 先self.extract_feat后self.pts_bbox_head
+
+        # 从当前图像中获取当前特征信息
+        img_feats_from_vlm = self.clip_head(img)
 
         # 提取图像特征
         img_metas = [each[len_queue-1] for each in img_metas]

@@ -141,7 +141,7 @@ class GenADHead(DETRHead):
                  dis_thresh=0.2,
                  pe_normalization=True,
                  ego_his_encoder=None,
-                 ego_fut_mode=3,
+                 ego_fut_mode=5,  # 3 -> 5，5种类型的指令
                  loss_plan_reg=dict(type='L1Loss', loss_weight=0.25),
                  loss_plan_bound=dict(type='PlanMapBoundLoss', loss_weight=0.1),
                  loss_plan_col=dict(type='PlanAgentDisLoss', loss_weight=0.1),
@@ -254,8 +254,8 @@ class GenADHead(DETRHead):
         super(GenADHead, self).__init__(*args, transformer=transformer, **kwargs)
         self.code_weights = nn.Parameter(torch.tensor(self.code_weights, requires_grad=False), requires_grad=False)
         self.map_code_weights = nn.Parameter(torch.tensor(self.map_code_weights, requires_grad=False), requires_grad=False)
-        self.cmd_query = nn.Embedding(5, self.embed_dims)
-        self.cmd_pos = nn.Embedding(5, self.embed_dims)
+        self.cmd_query = nn.Embedding(self.ego_fut_mode, self.embed_dims)
+        self.cmd_pos = nn.Embedding(self.ego_fut_mode, self.embed_dims)
         self.cmd_query_mlp = nn.Linear(self.embed_dims * 2, self.embed_dims)
         self.cmd_pos_mlp = nn.Linear(self.embed_dims * 2, self.embed_dims)
 

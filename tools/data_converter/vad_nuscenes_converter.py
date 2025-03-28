@@ -16,7 +16,26 @@ from mmdet3d.datasets import NuScenesDataset
 from nuscenes.utils.geometry_utils import view_points
 from mmdet3d.core.bbox.box_np_ops import points_cam2img
 from nuscenes.utils.geometry_utils import transform_matrix
+from nuscenes.map_expansion.map_api import NuScenesMap
+from nuscenes.map_expansion import arcline_path_utils
 
+import sys
+import warnings
+class suppress_output_and_warnings:
+    def __enter__(self):
+        self._original_stdout = sys.stdout  # 保存原始的stdout
+        self._original_stderr = sys.stderr  # 保存原始的stderr
+        sys.stdout = open(os.devnull, 'w')  # 重定向stdout到null设备
+        sys.stderr = open(os.devnull, 'w')  # 重定向stderr到null设备
+        self._original_warning_filters = warnings.filters[:]  # 保存当前的warning过滤器
+        warnings.filterwarnings("ignore")  # 暂时忽略所有警告
+    def __exit__(self, exc_type, exc_value, traceback):
+        sys.stdout.close()  # 关闭重定向的文件
+        sys.stderr.close()  # 关闭重定向的错误输出文件
+        sys.stdout = self._original_stdout  # 恢复原始stdout
+        sys.stderr = self._original_stderr  # 恢复原始stderr
+        warnings.filters.clear()  # 清空当前的warning过滤器
+        warnings.filters.extend(self._original_warning_filters)  # 恢复原来的warning过滤器
 
 nus_categories = ('car', 'truck', 'trailer', 'bus', 'construction_vehicle',
                   'bicycle', 'motorcycle', 'pedestrian', 'traffic_cone',
@@ -193,6 +212,41 @@ def _get_can_bus_info(nusc, nusc_can_bus, sample):
     can_bus.extend([0., 0.])
     return np.array(can_bus)
 
+def get_road_type(nusc, map_location, ego_pose):
+    # 获取地图
+    with suppress_output_and_warnings():
+        nusc_map = NuScenesMap(dataroot=nusc.dataroot, map_name=map_location)
+    # 获取车辆translation
+    ego_translation = ego_pose['translation']
+
+    # 获取最近的道路
+    closest_lane_token = nusc_map.get_closest_lane(ego_translation[0], ego_translation[1], radius=5.0)
+    if closest_lane_token is None:
+        # 当前车辆没有最近的道路
+        return "free road"
+
+    # 获取lane_record
+    lane_record = nusc_map.get_arcline_path(closest_lane_token)
+
+    # 获取road_segment
+    road_segment_token = nusc_map.layers_on_point(*lane_record[0]['start_pose'][:2], layer_names=['road_segment'])['road_segment']
+    road_segment = nusc_map.get('road_segment', road_segment_token)
+
+    # 开始判断
+    if road_segment['is_intersection']:
+        return "intersection"
+    else:
+        # 计算当前lane_record的总长度
+        length_total = sum([sum(path['segment_length']) for path in lane_record])
+        # 计算自车位置在车道上最近的点
+        _, distance_along_lane = arcline_path_utils.project_pose_to_lane(ego_translation[:2], lane_record)
+        distance_along_lane = min(distance_along_lane, length_total)
+        # 计算投影点处的斜率
+        curvature = arcline_path_utils.get_curvature_at_distance_along_lane(distance_along_lane, lane_record)
+        if curvature < 0.01:
+            return "straight road"
+        else:
+            return "curved road"
 
 def _fill_trainval_infos(nusc: NuScenes,
                          nusc_can_bus,
@@ -226,9 +280,8 @@ def _fill_trainval_infos(nusc: NuScenes,
     for sample in mmcv.track_iter_progress(nusc.sample):
         map_location = nusc.get('log', nusc.get('scene', sample['scene_token'])['log_token'])['location']
         lidar_token = sample['data']['LIDAR_TOP']
-        sd_rec = nusc.get('sample_data', sample['data']['LIDAR_TOP'])
-        cs_record = nusc.get('calibrated_sensor',
-                             sd_rec['calibrated_sensor_token'])
+        sd_rec = nusc.get('sample_data', lidar_token)
+        cs_record = nusc.get('calibrated_sensor', sd_rec['calibrated_sensor_token'])
         pose_record = nusc.get('ego_pose', sd_rec['ego_pose_token'])
         if sample['prev'] != '':
             sample_prev = nusc.get('sample', sample['prev'])
@@ -244,6 +297,9 @@ def _fill_trainval_infos(nusc: NuScenes,
             pose_record_next = None
 
         lidar_path, boxes, _ = nusc.get_sample_data(lidar_token)
+
+        # 获取当前ego所在的道路类型
+        road_type = get_road_type(nusc, map_location, pose_record)
 
         mmcv.check_file_exist(lidar_path)
         # 获取sample的can_bus信息
@@ -276,7 +332,8 @@ def _fill_trainval_infos(nusc: NuScenes,
             'ego2global_rotation': pose_record['rotation'],
             'timestamp': sample['timestamp'],
             'fut_valid_flag': fut_valid_flag,
-            'map_location': map_location
+            'map_location': map_location,
+            'road_type': road_type
         }
 
         # 当 sample['next'] == '' 时，表示当前帧为最后一帧，需要将 frame_idx 重置为 0
@@ -558,10 +615,8 @@ def _fill_trainval_infos(nusc: NuScenes,
             info['gt_boxes'] = gt_boxes
             info['gt_names'] = names
             info['gt_velocity'] = velocity.reshape(-1, 2)
-            info['num_lidar_pts'] = np.array(
-                [a['num_lidar_pts'] for a in annotations])
-            info['num_radar_pts'] = np.array(
-                [a['num_radar_pts'] for a in annotations])
+            info['num_lidar_pts'] = np.array([a['num_lidar_pts'] for a in annotations])
+            info['num_radar_pts'] = np.array([a['num_radar_pts'] for a in annotations])
             info['valid_flag'] = valid_flag
             info['gt_agent_fut_trajs'] = gt_fut_trajs.reshape(-1, fut_ts*2).astype(np.float32)
             info['gt_agent_fut_masks'] = gt_fut_masks.reshape(-1, fut_ts).astype(np.float32)

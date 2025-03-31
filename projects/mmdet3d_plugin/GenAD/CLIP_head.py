@@ -18,9 +18,9 @@ class CLIPHead(nn.Module):
         self.text = {}
         self.query = {}
         self.fuse = nn.ModuleDict()
-        self.keys = ['traffic_light', 'traffic_condition']
+        self.keys = ['road_type', 'traffic_condition']
 
-        # 红绿的特征，traffic_light
+        # 道路特征，road_type
         key = self.keys[0]
         self.text.update({
             key: [

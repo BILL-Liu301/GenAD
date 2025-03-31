@@ -218,35 +218,41 @@ def get_road_type(nusc, map_location, ego_pose):
         nusc_map = NuScenesMap(dataroot=nusc.dataroot, map_name=map_location)
     # 获取车辆translation
     ego_translation = ego_pose['translation']
+    
+    road_type = None
 
     # 获取最近的道路
     closest_lane_token = nusc_map.get_closest_lane(ego_translation[0], ego_translation[1], radius=5.0)
     if closest_lane_token is None:
         # 当前车辆没有最近的道路
-        return "free road"
-
-    # 获取lane_record
-    lane_record = nusc_map.get_arcline_path(closest_lane_token)
-
-    # 获取road_segment
-    road_segment_token = nusc_map.layers_on_point(*lane_record[0]['start_pose'][:2], layer_names=['road_segment'])['road_segment']
-    road_segment = nusc_map.get('road_segment', road_segment_token)
-
-    # 开始判断
-    if road_segment['is_intersection']:
-        return "intersection"
+        road_type = "free road"
     else:
+        # 获取lane_record
+        lane_record = nusc_map.get_arcline_path(closest_lane_token)
+
         # 计算当前lane_record的总长度
         length_total = sum([sum(path['segment_length']) for path in lane_record])
         # 计算自车位置在车道上最近的点
         _, distance_along_lane = arcline_path_utils.project_pose_to_lane(ego_translation[:2], lane_record)
-        distance_along_lane = min(distance_along_lane, length_total)
+        distance_along_lane = min(distance_along_lane, length_total - 1e-3)
         # 计算投影点处的斜率
         curvature = arcline_path_utils.get_curvature_at_distance_along_lane(distance_along_lane, lane_record)
         if curvature < 0.01:
-            return "straight road"
+            road_type = "straight road"
         else:
-            return "curved road"
+            road_type = "curved road"
+
+        # 获取road_segment，看看当前是不是路口
+        road_segment_token = nusc_map.layers_on_point(*lane_record[0]['start_pose'][:2], layer_names=['road_segment'])['road_segment']
+        if len(road_segment_token) > 0:
+            road_segment = nusc_map.get('road_segment', road_segment_token)
+            road_type = "intersection" if road_segment['is_intersection'] else road_type
+
+    # 将road_type转换为one-hot形式
+    types = ['free road', 'intersection','straight road', 'curved road']
+    road_type_one_hot = np.array([1 if road_type == t else 0 for t in types]).reshape(-1, 1)
+
+    return road_type, road_type_one_hot
 
 def get_traffic_condition(agents, names):
     def cal_num_in_range(range_lon, range_lat):
@@ -271,6 +277,10 @@ def get_traffic_condition(agents, names):
     else:
         traffic_condition = "free traffic"
 
+    # 将traffic_condition转换为one-hot形式
+    types = ['free traffic', 'heavy traffic', 'normal traffic','smooth traffic']
+    traffic_condition_one_hot = np.array([1 if traffic_condition == t else 0 for t in types]).reshape(-1, 1)
+
     # import matplotlib.pyplot as plt
     # import matplotlib.patches as patches
     # fig = plt.figure()
@@ -285,7 +295,7 @@ def get_traffic_condition(agents, names):
     # plt.gca().set_aspect('equal')
     # plt.close(fig)
 
-    return traffic_condition
+    return traffic_condition, traffic_condition_one_hot
 
 def _fill_trainval_infos(nusc: NuScenes,
                          nusc_can_bus,
@@ -338,7 +348,7 @@ def _fill_trainval_infos(nusc: NuScenes,
         lidar_path, boxes, _ = nusc.get_sample_data(lidar_token)
 
         # 获取当前ego所在的道路类型
-        road_type = get_road_type(nusc, map_location, pose_record)
+        road_type, road_type_one_hot = get_road_type(nusc, map_location, pose_record)
 
         mmcv.check_file_exist(lidar_path)
         # 获取sample的can_bus信息
@@ -372,7 +382,8 @@ def _fill_trainval_infos(nusc: NuScenes,
             'timestamp': sample['timestamp'],
             'fut_valid_flag': fut_valid_flag,
             'map_location': map_location,
-            'road_type': road_type
+            'road_type': road_type,
+            'road_type_one_hot': road_type_one_hot
         }
 
         # 当 sample['next'] == '' 时，表示当前帧为最后一帧，需要将 frame_idx 重置为 0
@@ -595,7 +606,7 @@ def _fill_trainval_infos(nusc: NuScenes,
                 raise ValueError('x_end out of range')
 
             # 获取当前道路交通情况
-            traffic_condition = get_traffic_condition(agent_lcf_feat, names)
+            traffic_condition, traffic_condition_one_hot = get_traffic_condition(agent_lcf_feat, names)
 
             # offset from lcf -> per-step offset
             ego_fut_trajs = ego_fut_trajs[1:] - ego_fut_trajs[:-1]
@@ -670,7 +681,8 @@ def _fill_trainval_infos(nusc: NuScenes,
             info['gt_ego_fut_masks'] = ego_fut_masks[1:].astype(np.float32)
             info['gt_ego_fut_cmd'] = command.astype(np.float32)  # 指令
             info['gt_ego_lcf_feat'] = ego_lcf_feat.astype(np.float32)
-            info['gt_traffic_condition'] = traffic_condition
+            info['traffic_condition'] = traffic_condition
+            info['traffic_condition_one_hot'] = traffic_condition_one_hot.astype(np.float32)
 
         if sample['scene_token'] in train_scenes:
             train_nusc_infos.append(info)

@@ -41,6 +41,7 @@ class CLIPHead(nn.Module):
         key = self.keys[1]
         self.text.update({
             key: [
+                'a free traffic',
                 'a smooth traffic',
                 'a normal traffic',
                 'a heavy traffic'

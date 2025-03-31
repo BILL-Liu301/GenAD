@@ -248,6 +248,45 @@ def get_road_type(nusc, map_location, ego_pose):
         else:
             return "curved road"
 
+def get_traffic_condition(agents, names):
+    def cal_num_in_range(range_lon, range_lat):
+        num = 0
+        for agent, name in zip(agents_useful, names):
+            if range_lon[0] <= agent[0] <= range_lon[1] and range_lat[0] <= agent[1] <= range_lat[1]:
+                num += 1
+        return num
+
+    # 通过names过滤一遍
+    agents_useful = []
+    for agent, name in zip(agents, names):
+        if name in ['barrier', 'bicycle', 'bus', 'car', 'construction_vehicle', 'motorcycle', 'trailer', 'truck']:
+            agents_useful.append(agent)
+
+    if cal_num_in_range([-5, 5], [0, 10]) >= 2:
+        traffic_condition = "heavy traffic"
+    elif cal_num_in_range([-10, 10], [0, 15]) >= 2:
+        traffic_condition = "normal traffic"
+    elif cal_num_in_range([-15, 15], [0, 25]) >= 2:
+        traffic_condition = "smooth traffic"
+    else:
+        traffic_condition = "free traffic"
+
+    # import matplotlib.pyplot as plt
+    # import matplotlib.patches as patches
+    # fig = plt.figure()
+    # for agent in agents:
+    #     plt.plot(agent[0], agent[1], 'go')
+    # rect = patches.Rectangle((-5, 0), 10, 10, linewidth=1, edgecolor='r', facecolor='none')
+    # plt.gca().add_patch(rect)
+    # rect = patches.Rectangle((-10, 0), 20, 30, linewidth=1, edgecolor='r', facecolor='none')
+    # plt.gca().add_patch(rect)
+    # rect = patches.Rectangle((-15, 0), 30, 50, linewidth=1, edgecolor='r', facecolor='none')
+    # plt.gca().add_patch(rect)
+    # plt.gca().set_aspect('equal')
+    # plt.close(fig)
+
+    return traffic_condition
+
 def _fill_trainval_infos(nusc: NuScenes,
                          nusc_can_bus,
                          train_scenes,
@@ -538,7 +577,7 @@ def _fill_trainval_infos(nusc: NuScenes,
             # 右偏转：1 < x < 2
             # 右转：2 < x
 
-            # drive command according to final fut step offset from lcf
+            # drive command according to final fut step offset from lcfw
             # 生成指令
             x_end = ego_fut_trajs[-1, 0]
             command = np.zeros(5)
@@ -554,6 +593,9 @@ def _fill_trainval_infos(nusc: NuScenes,
                 command[4] = 1  # 右转
             else:
                 raise ValueError('x_end out of range')
+
+            # 获取当前道路交通情况
+            traffic_condition = get_traffic_condition(agent_lcf_feat, names)
 
             # offset from lcf -> per-step offset
             ego_fut_trajs = ego_fut_trajs[1:] - ego_fut_trajs[:-1]
@@ -628,6 +670,7 @@ def _fill_trainval_infos(nusc: NuScenes,
             info['gt_ego_fut_masks'] = ego_fut_masks[1:].astype(np.float32)
             info['gt_ego_fut_cmd'] = command.astype(np.float32)  # 指令
             info['gt_ego_lcf_feat'] = ego_lcf_feat.astype(np.float32)
+            info['gt_traffic_condition'] = traffic_condition
 
         if sample['scene_token'] in train_scenes:
             train_nusc_infos.append(info)

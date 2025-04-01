@@ -548,7 +548,7 @@ class GenADHead(DETRHead):
                 gt_attr_labels=None,
                 ego_fut_trajs=None,
                 ego_fut_cmd=None,
-                img_feats_from_vlm=None
+                vlm_img_feats=None
                 ):
         """Forward function.
         Args:
@@ -686,8 +686,8 @@ class GenADHead(DETRHead):
         # 重点关注对象
 
         # 将从vlm中提取特征降低维度，进行对齐
-        feats_vlm = self.vlm_motion_mlp(img_feats_from_vlm.to(dtype))  # [B, n, 512] -> [B, n, 256]
-        feats_vlm = feats_vlm.permute(1, 0, 2)  # [n, B, 256]
+        vlm_feats = self.vlm_motion_mlp(vlm_img_feats.to(dtype))  # [B, n, 512] -> [B, n, 256]
+        vlm_feats = vlm_feats.permute(1, 0, 2)  # [n, B, 256]
 
         # motion query
         if self.motion_decoder is not None:
@@ -748,7 +748,7 @@ class GenADHead(DETRHead):
             # 将motion_query和vlm提取的特征进行特征融合
             motion_query_fuse = self.vlm_motion_ca(
                 motion_query,
-                feats_vlm
+                vlm_feats
             )
 
             # 此处的decoder就是TransformerDecoder
@@ -798,7 +798,7 @@ class GenADHead(DETRHead):
                 # 将map_query和vlm提取的特征进行特征融合
                 map_query_fuse = self.vlm_map_ca(
                     map_query,
-                    feats_vlm
+                    vlm_feats
                 )
 
                 # 此处的decoder就是TransformerDecoder
@@ -1617,7 +1617,9 @@ class GenADHead(DETRHead):
              gt_attr_labels,
              gt_bboxes_ignore=None,
              map_gt_bboxes_ignore=None,
-             img_metas=None
+             img_metas=None,
+             vlm_descriptions=None,
+             gt_descriptions=None
             ):
         """"Loss function.
         Args:
@@ -1812,6 +1814,8 @@ class GenADHead(DETRHead):
             loss_dict['enc_loss_map_dir'] = map_enc_loss_dir
 
         loss_dict['loss_vae_gen'] = self.loss_vae_gen(distribution_pred)
+
+        # 计算CLIP的loss
 
         return loss_dict
 

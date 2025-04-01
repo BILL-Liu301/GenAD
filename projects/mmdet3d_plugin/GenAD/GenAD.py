@@ -123,9 +123,9 @@ class GenAD(MVXTwoStageDetector):
                           ego_fut_cmd=None,
                           ego_lcf_feat=None,
                           gt_attr_labels=None,
-                          img_feats_from_vlm=None,
-                          descriptions_from_vlm=None,
-                          descriptions_gt=None
+                          vlm_img_feats=None,
+                          vlm_descriptions=None,
+                          gt_descriptions=None
                           ):
         """Forward function'
         Args:
@@ -148,15 +148,20 @@ class GenAD(MVXTwoStageDetector):
             ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,
             gt_labels_3d=gt_labels_3d, gt_attr_labels=gt_attr_labels,
             ego_fut_trajs=ego_fut_trajs, ego_fut_cmd=ego_fut_cmd,
-            img_feats_from_vlm=img_feats_from_vlm
+            vlm_img_feats=vlm_img_feats
         )
 
         # 计算loss
         loss_inputs = [
             gt_bboxes_3d, gt_labels_3d, map_gt_bboxes_3d, map_gt_labels_3d,
-            outs, ego_fut_trajs, ego_fut_masks, ego_fut_cmd, gt_attr_labels,
+            outs, ego_fut_trajs, ego_fut_masks, ego_fut_cmd, gt_attr_labels
         ]
-        losses = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
+        losses = self.pts_bbox_head.loss(
+            *loss_inputs, 
+            vlm_descriptions=vlm_descriptions,
+            gt_descriptions=gt_descriptions,
+            img_metas=img_metas
+        )
         return losses
 
     def forward_dummy(self, img):
@@ -219,7 +224,7 @@ class GenAD(MVXTwoStageDetector):
                       ego_fut_cmd=None,
                       ego_lcf_feat=None,
                       gt_attr_labels=None,
-                      descriptions_gt=None,
+                      gt_descriptions=None
                       ):
         """Forward training function.
         Args:
@@ -254,7 +259,7 @@ class GenAD(MVXTwoStageDetector):
         prev_bev = self.obtain_history_bev(prev_img, prev_img_metas) if len_queue > 1 else None  # 先self.extract_feat后self.pts_bbox_head
 
         # 从当前图像中获取当前特征信息
-        img_feats_from_vlm, descriptions_from_vlm = self.clip_head(img)
+        vlm_img_feats, vlm_descriptions = self.clip_head(img)
 
         # 提取图像特征
         img_metas = [each[len_queue-1] for each in img_metas]
@@ -270,7 +275,7 @@ class GenAD(MVXTwoStageDetector):
             ego_his_trajs=ego_his_trajs, ego_fut_trajs=ego_fut_trajs,
             ego_fut_masks=ego_fut_masks, ego_fut_cmd=ego_fut_cmd,
             ego_lcf_feat=ego_lcf_feat, gt_attr_labels=gt_attr_labels,
-            img_feats_from_vlm=img_feats_from_vlm, descriptions_from_vlm=descriptions_from_vlm, descriptions_gt=descriptions_gt
+            vlm_img_feats=vlm_img_feats, vlm_descriptions=vlm_descriptions, gt_descriptions=gt_descriptions
         )
 
         losses.update(losses_pts)

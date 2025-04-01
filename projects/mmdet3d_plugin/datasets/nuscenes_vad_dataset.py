@@ -1309,7 +1309,8 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
             ego_fut_trajs=info['gt_ego_fut_trajs'],
             ego_fut_masks=info['gt_ego_fut_masks'],
             ego_fut_cmd=info['gt_ego_fut_cmd'],
-            ego_lcf_feat=info['gt_ego_lcf_feat']
+            ego_lcf_feat=info['gt_ego_lcf_feat'],
+            gt_descriptions=info['gt_descriptions'],
         )
         # lidar to ego transform
         lidar2ego = np.eye(4).astype(np.float32)

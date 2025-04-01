@@ -7,11 +7,12 @@ from CLIP import clip
 class CLIPHead(nn.Module):
     def __init__(self, device):
         super().__init__()
-        self.dtype = torch.float16
+        self.dtype = torch.float32
         self.feature_dim = 512
 
         self.model, _ = clip.load('ViT-B/32', device)
         self.model = self.model.train()
+        self.model = self.model.to(self.dtype)
 
         self.multi_img_feats_fuse = nn.Conv1d(in_channels=6, out_channels=1, kernel_size=1, bias=False, dtype=self.dtype)
 
@@ -22,13 +23,9 @@ class CLIPHead(nn.Module):
 
         # 道路特征，road_type
         key = self.keys[0]
+        descriptions = ['free road', 'intersection','straight road', 'curved road']
         self.text.update({
-            key: [
-                'a red traffic light',
-                'a green traffic light',
-                'a yellow traffic light',
-                'No traffic light'
-            ]
+            key: [f'a {d}' for d in descriptions]
         })
         self.query.update({
             key: nn.Parameter(torch.randn(1, 1, self.feature_dim, dtype=self.dtype, device=device), requires_grad=True)
@@ -39,13 +36,9 @@ class CLIPHead(nn.Module):
 
         # 交通情况，traffic_condition
         key = self.keys[1]
+        descriptions = ['free traffic', 'heavy traffic', 'normal traffic','smooth traffic']
         self.text.update({
-            key: [
-                'a free traffic',
-                'a smooth traffic',
-                'a normal traffic',
-                'a heavy traffic'
-            ]
+            key: [f'a {d}' for d in descriptions]
         })
         self.query.update({
             key: nn.Parameter(torch.randn(1, 1, self.feature_dim, dtype=self.dtype, device=device), requires_grad=True)
@@ -69,8 +62,8 @@ class CLIPHead(nn.Module):
             text_feats_ = self.get_text_feats(key, img_feats_.dtype, img_feats_.device)
 
             # normalize
-            img_feats_ /= img_feats_.norm(dim=-1, keepdim=True)
-            text_feats_ /= text_feats_.norm(dim=-1, keepdim=True)
+            img_feats_ = img_feats_ / img_feats_.norm(dim=-1, keepdim=True)
+            text_feats_ = text_feats_ / text_feats_.norm(dim=-1, keepdim=True)
 
             # 特征之间交互
             descriptions_ = img_feats_ @ text_feats_.T

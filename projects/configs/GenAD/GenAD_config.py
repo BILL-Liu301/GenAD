@@ -328,7 +328,9 @@ train_pipeline = [
     dict(type='CustomDefaultFormatBundle3D', class_names=class_names, with_ego=True),
     dict(type='CustomCollect3D',\
          keys=['gt_bboxes_3d', 'gt_labels_3d', 'img', 'ego_his_trajs',
-               'ego_fut_trajs', 'ego_fut_masks', 'ego_fut_cmd', 'ego_lcf_feat', 'gt_attr_labels'])
+               'ego_fut_trajs', 'ego_fut_masks', 'ego_fut_cmd', 'ego_lcf_feat', 'gt_attr_labels',
+               'gt_descriptions'
+               ])
 ]
 
 test_pipeline = [

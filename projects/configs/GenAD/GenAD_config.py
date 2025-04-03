@@ -329,7 +329,7 @@ train_pipeline = [
     dict(type='CustomCollect3D',\
          keys=['gt_bboxes_3d', 'gt_labels_3d', 'img', 'ego_his_trajs',
                'ego_fut_trajs', 'ego_fut_masks', 'ego_fut_cmd', 'ego_lcf_feat', 'gt_attr_labels',
-               'gt_descriptions'
+               'road_type', 'traffic_condition'
                ])
 ]
 

@@ -257,21 +257,59 @@ class GenADHead(DETRHead):
 
         # cross-attention，vlm提取的特征和motion_query之间
         self.vlm_motion_mlp = nn.Linear(512, self.embed_dims)
-        self.vlm_motion_ca = nn.TransformerDecoder(
-            nn.TransformerDecoderLayer(
-                d_model=self.embed_dims,
-                nhead=4
-            ),
-            num_layers=2
-        )
-        self.vlm_map_ca = nn.TransformerDecoder(
-            nn.TransformerDecoderLayer(
-                d_model=self.embed_dims,
-                nhead=4,
-                batch_first=True
-            ),
-            num_layers=2
-        )
+        # self.vlm_motion_sa = nn.TransformerDecoder(
+        #     nn.TransformerDecoderLayer(
+        #         d_model=self.embed_dims,
+        #         nhead=4
+        #     ),
+        #     num_layers=2
+        # )
+        self.vlm_motion_sa = build_transformer_layer_sequence(dict(
+            type='CustomTransformerDecoder',
+            num_layers=1,
+            return_intermediate=False,
+            transformerlayers=dict(
+                type='BaseTransformerLayer',
+                attn_cfgs=[
+                    dict(
+                        type='MultiheadAttention',
+                        embed_dims=self.embed_dims,
+                        num_heads=8,
+                        dropout=0.1
+                    ),
+                ],
+                feedforward_channels=self.embed_dims * 2,
+                ffn_dropout=0.1,
+                operation_order=('cross_attn', 'norm', 'ffn', 'norm')
+            )
+        ))
+        # self.vlm_map_sa = nn.TransformerDecoder(
+        #     nn.TransformerDecoderLayer(
+        #         d_model=self.embed_dims,
+        #         nhead=4,
+        #         batch_first=True
+        #     ),
+        #     num_layers=2
+        # )
+        self.vlm_map_sa = build_transformer_layer_sequence(dict(
+            type='CustomTransformerDecoder',
+            num_layers=1,
+            return_intermediate=False,
+            transformerlayers=dict(
+                type='BaseTransformerLayer',
+                attn_cfgs=[
+                    dict(
+                        type='MultiheadAttention',
+                        embed_dims=self.embed_dims,
+                        num_heads=8,
+                        dropout=0.1
+                    ),
+                ],
+                feedforward_channels=self.embed_dims * 2,
+                ffn_dropout=0.1,
+                operation_order=('cross_attn', 'norm', 'ffn', 'norm')
+            )
+        ))
 
         # cmd部分
         self.cmd_query = nn.Embedding(self.ego_fut_mode, self.embed_dims)
@@ -746,9 +784,10 @@ class GenADHead(DETRHead):
             # motion_pos = torch.cat([motion_pos, cmd_ego_pos], dim=0)  # [1801, 1, 256]
 
             # 将motion_query和vlm提取的特征进行特征融合
-            motion_query_fuse = self.vlm_motion_ca(
-                motion_query,
-                vlm_feats
+            motion_query_fuse = self.vlm_motion_sa(
+                query=motion_query,
+                key=vlm_feats,
+                value=vlm_feats
             )
 
             # 此处的decoder就是TransformerDecoder
@@ -796,9 +835,10 @@ class GenADHead(DETRHead):
                     motion_pos, map_pos = None, None
 
                 # 将map_query和vlm提取的特征进行特征融合
-                map_query_fuse = self.vlm_map_ca(
-                    map_query,
-                    vlm_feats
+                map_query_fuse = self.vlm_map_sa(
+                    query=map_query,
+                    key=vlm_feats.repeat(1, map_query.shape[1], 1),
+                    value=vlm_feats.repeat(1, map_query.shape[1], 1)
                 )
 
                 # 此处的decoder就是TransformerDecoder
@@ -1816,6 +1856,25 @@ class GenADHead(DETRHead):
         loss_dict['loss_vae_gen'] = self.loss_vae_gen(distribution_pred)
 
         # 计算CLIP的loss
+        loss_description = []
+        for k in gt_descriptions:
+            # 此处的维度有点问题，暂时不管它
+            gt_d = gt_descriptions[k].argmax(dim=-1).long()
+            if len(gt_d.shape) == 2:
+                gt_d = gt_d.flatten(0, 1)
+            elif len(gt_d.shape) == 3:
+                gt_d = gt_d.squeeze(0).flatten(0, 1)
+            else:
+                raise NotImplementedError
+            vlm_d = vlm_descriptions[k].flatten(0, 1)
+            loss_description.append(
+                F.cross_entropy(
+                    vlm_d, 
+                    gt_d, 
+                    reduction='mean'
+                )
+            )
+        loss_dict['loss_clip'] = sum(loss_description)
 
         return loss_dict
 
@@ -2202,26 +2261,4 @@ class GenADHead(DETRHead):
 
         # 在输入的时候，hidden_states = current_states
         # 同上，我感觉此处的reshape很奇怪
-        hidden_state = hidden_states.reshape(self.layer_dim, -1, int(self.embed_dims / 2))  # [1, 1801, 512] -> [4, 1801, 128]
-        
-        # 此处这个self.predict_model包含了GRU
-        future_states = self.predict_model(  # [6, 1801, 512]
-            future_prediction_input,  # [6, 1801, 32]
-            hidden_state  # [4, 1801, 128]
-        )
-
-        current_states_hs = current_states.unsqueeze(0).repeat(self.fut_ts, 1, 1, 1)  # [1, 1801, 512] -> [1, 1, 1801, 512] -> [6, 1, 1801, 512]
-        future_states_hs = future_states.reshape(self.fut_ts, batch_size, -1, future_states.shape[2])  # [6, 1801, 512] -> [6, 1, 1801, 512]
-
-        if self.with_cur:
-            states_hs = torch.cat((current_states_hs, future_states_hs), dim=-1)  # [6, 1, 1801, 1024]
-        else:
-            states_hs = future_states_hs
-
-        return states_hs, future_states_hs
-
-
-
-
-
-
+        hidden_state = hidden_states.reshape(self

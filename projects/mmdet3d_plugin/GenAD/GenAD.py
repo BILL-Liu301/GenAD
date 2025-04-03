@@ -224,7 +224,7 @@ class GenAD(MVXTwoStageDetector):
                       ego_fut_cmd=None,
                       ego_lcf_feat=None,
                       gt_attr_labels=None,
-                      gt_descriptions=None
+                      **kwargs
                       ):
         """Forward training function.
         Args:
@@ -260,6 +260,12 @@ class GenAD(MVXTwoStageDetector):
 
         # 从当前图像中获取当前特征信息
         vlm_img_feats, vlm_descriptions = self.clip_head(img)
+
+        # 合并gt_descriptions
+        gt_descriptions = {
+            'road_type': kwargs['road_type'],
+            'traffic_condition': kwargs['traffic_condition']
+        }
 
         # 提取图像特征
         img_metas = [each[len_queue-1] for each in img_metas]

@@ -1857,7 +1857,7 @@ class GenADHead(DETRHead):
 
         # 计算CLIP的loss
         loss_description = self.loss_description(vlm_descriptions, gt_descriptions)
-        loss_dict['loss_clip'] = sum(loss_description.values())
+        loss_dict.update(loss_description)
 
         return loss_dict
 

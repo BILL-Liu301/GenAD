@@ -14,8 +14,6 @@ class CLIPHead(nn.Module):
         self.model = self.model.train()
         self.model = self.model.to(self.dtype)
 
-        self.multi_img_feats_fuse = nn.Conv1d(in_channels=6, out_channels=1, kernel_size=1, bias=False, dtype=self.dtype)
-
         self.text = {}
         self.query = {}
         self.fuse = nn.ModuleDict()
@@ -25,26 +23,32 @@ class CLIPHead(nn.Module):
         key = self.keys[0]
         descriptions = ['free road', 'intersection','straight road', 'curved road']
         self.text.update({
-            key: [f'a {d}' for d in descriptions]
+            key: descriptions
         })
         self.query.update({
             key: nn.Parameter(torch.randn(1, 1, self.feature_dim, dtype=self.dtype, device=device), requires_grad=True)
         })
         self.fuse.update({
-            key: nn.Linear(self.feature_dim * 2, self.feature_dim, bias=False, dtype=self.dtype)
+            key: nn.ModuleList([
+                nn.Linear(self.feature_dim * 2, self.feature_dim, bias=False, dtype=self.dtype),  # 将query融入
+                nn.Conv1d(in_channels=6, out_channels=1, kernel_size=1, bias=False, dtype=self.dtype)  # 多视角图像数据的融合
+            ])
         })
 
         # 交通情况，traffic_condition
         key = self.keys[1]
         descriptions = ['free traffic', 'heavy traffic', 'normal traffic','smooth traffic']
         self.text.update({
-            key: [f'a {d}' for d in descriptions]
+            key: descriptions
         })
         self.query.update({
             key: nn.Parameter(torch.randn(1, 1, self.feature_dim, dtype=self.dtype, device=device), requires_grad=True)
         })
         self.fuse.update({
-            key: nn.Linear(self.feature_dim * 2, self.feature_dim, bias=False, dtype=self.dtype)
+            key: nn.ModuleList([
+                nn.Linear(self.feature_dim * 2, self.feature_dim, bias=False, dtype=self.dtype),  # 将query融入
+                nn.Conv1d(in_channels=6, out_channels=1, kernel_size=1, bias=False, dtype=self.dtype)  # 多视角图像数据的融合
+            ])
         })
 
 
@@ -84,10 +88,10 @@ class CLIPHead(nn.Module):
 
         # 将query融入到feats中
         feats = torch.cat([img_feats, query], dim=-1)
-        feats_fuse = self.fuse[key](feats)
+        feats_fuse = self.fuse[key][0](feats)
 
         # 将多视角的图像特征融合
-        feats_fuse = self.multi_img_feats_fuse(feats_fuse)
+        feats_fuse = self.fuse[key][1](feats_fuse)
 
         return feats_fuse
     

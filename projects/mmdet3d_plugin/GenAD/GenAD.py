@@ -263,8 +263,8 @@ class GenAD(MVXTwoStageDetector):
 
         # 合并gt_descriptions
         gt_descriptions = {
-            'road_type': kwargs['road_type'],
-            'traffic_condition': kwargs['traffic_condition']
+            'road_type_one_hot': flatten_data_from_list(kwargs['road_type_one_hot']),
+            'traffic_condition_one_hot': flatten_data_from_list(kwargs['traffic_condition_one_hot'])
         }
 
         # 提取图像特征
@@ -364,8 +364,22 @@ class GenAD(MVXTwoStageDetector):
         **kwargs
     ):
         """Test function without augmentaiton."""
+
+        # 从当前图像中获取当前特征信息
+        vlm_img_feats, vlm_descriptions = self.clip_head(img)
+        # 合并gt_descriptions
+        gt_descriptions = {
+            'road_type': flatten_data_from_list(kwargs['road_type']),
+            'road_type_one_hot': flatten_data_from_list(kwargs['road_type_one_hot']),
+            'road_type_all': flatten_data_from_list(kwargs['road_type_all']),
+            'traffic_condition': flatten_data_from_list(kwargs['traffic_condition']),
+            'traffic_condition_one_hot': flatten_data_from_list(kwargs['traffic_condition_one_hot']),
+            'traffic_condition_all': flatten_data_from_list(kwargs['traffic_condition_all'])
+        }
+
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
         bbox_list = [dict() for i in range(len(img_metas))]
+
         new_prev_bev, bbox_pts, metric_dict = self.simple_test_pts(
             img_feats,
             img_metas,
@@ -380,6 +394,9 @@ class GenAD(MVXTwoStageDetector):
             ego_fut_cmd=ego_fut_cmd,
             ego_lcf_feat=ego_lcf_feat,
             gt_attr_labels=gt_attr_labels,
+            vlm_img_feats=vlm_img_feats,
+            vlm_descriptions=vlm_descriptions,
+            gt_descriptions=gt_descriptions
         )
         for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
             result_dict['pts_bbox'] = pts_bbox
@@ -402,6 +419,9 @@ class GenAD(MVXTwoStageDetector):
         ego_fut_cmd=None,
         ego_lcf_feat=None,
         gt_attr_labels=None,
+        vlm_img_feats=None,
+        vlm_descriptions=None,
+        gt_descriptions=None
     ):
         """Test function"""
         mapped_class_names = [
@@ -413,13 +433,13 @@ class GenAD(MVXTwoStageDetector):
 
         outs = self.pts_bbox_head(
             x, img_metas, prev_bev=prev_bev,
-            ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,ego_fut_cmd=ego_fut_cmd
+            ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,ego_fut_cmd=ego_fut_cmd,
+            vlm_img_feats=vlm_img_feats
         )
         bbox_list = self.pts_bbox_head.get_bboxes(outs, img_metas, rescale=rescale)
 
         bbox_results = []
-        for i, (bboxes, scores, labels, trajs, map_bboxes, \
-                map_scores, map_labels, map_pts) in enumerate(bbox_list):
+        for i, (bboxes, scores, labels, trajs, map_bboxes, map_scores, map_labels, map_pts) in enumerate(bbox_list):
             bbox_result = bbox3d2result(bboxes, scores, labels)
             bbox_result['trajs_3d'] = trajs.cpu()
             map_bbox_result = self.map_pred2result(map_bboxes, map_scores, map_labels, map_pts)
@@ -427,6 +447,8 @@ class GenAD(MVXTwoStageDetector):
             bbox_result['ego_fut_preds'] = outs['ego_fut_preds'][i].cpu()
             bbox_result['ego_fut_cmd'] = ego_fut_cmd.cpu()
             bbox_results.append(bbox_result)
+        bbox_result['vlm_descriptions'] = {k: v.softmax(dim=-1).cpu().numpy() for k, v in vlm_descriptions.items()}
+        bbox_result['gt_descriptions'] = {k: v.cpu().numpy() if isinstance(v, torch.Tensor) else v for k, v in gt_descriptions.items()}
 
         assert len(bbox_results) == 1, 'only support batch_size=1 now'
         score_threshold = 0.6
@@ -470,6 +492,10 @@ class GenAD(MVXTwoStageDetector):
                 fut_valid_flag = fut_valid_flag
             )
             metric_dict.update(metric_dict_planner_stp3)
+
+            metric_ = self.pts_bbox_head.loss_description(vlm_descriptions, gt_descriptions)
+            metric_ = {f'description_{k}': v.cpu().item() for k, v in metric_.items()}
+            metric_dict.update(metric_)
 
         return outs['bev_embed'], bbox_results, metric_dict
 
@@ -700,3 +726,10 @@ class GenAD(MVXTwoStageDetector):
 
     def set_epoch(self, epoch): 
         self.pts_bbox_head.epoch = epoch
+
+def flatten_data_from_list(inp):
+    if isinstance(inp, list):
+        assert len(inp) == 1
+        return flatten_data_from_list(inp[0])
+    else:
+        return inp

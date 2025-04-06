@@ -1467,6 +1467,7 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
         map_mapped_class_names = self.MAPCLASSES
 
         plan_annos = {}
+        descriptions = {}
 
         print('Start to convert detection format...')
         # for sample_id, det in enumerate(mmcv.track_iter_progress(results)):
@@ -1540,6 +1541,11 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
             map_pred_anno['vectors'] = pred_vec_list
             map_pred_annos[sample_token] = map_pred_anno
 
+            descriptions[sample_token] = {
+                'vlm': det['vlm_descriptions'],
+                'gt': det['gt_descriptions']
+            }
+
         if not os.path.exists(self.map_ann_file):
             self._format_gt()
         else:
@@ -1552,7 +1558,8 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
             'meta': self.modality,
             'results': nusc_annos,
             'map_results': map_pred_annos,
-            'plan_results': plan_annos
+            'plan_results': plan_annos,
+            'description_results': descriptions
             # 'GTs': gt_annos
         }
 
@@ -1614,6 +1621,7 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
                     print(f'\nFormating bboxes of {name}')
                     results_ = [out[name] for out in results]
                     tmp_file_ = osp.join(jsonfile_prefix, name)
+                    # 在此处规整
                     result_files.update({name: self._format_bbox(results_, file_name, jsonfile_prefix=tmp_file_)})
                 elif name == 'input':
                     result_input.update({name: [out[name] for out in results]})
@@ -1776,8 +1784,7 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
         """
         result_metric_names = ['EPA', 'ADE', 'FDE', 'MR']
         motion_cls_names = ['car', 'pedestrian']
-        motion_metric_names = ['gt', 'cnt_ade', 'cnt_fde', 'hit',
-                               'fp', 'ADE', 'FDE', 'MR']
+        motion_metric_names = ['gt', 'cnt_ade', 'cnt_fde', 'hit', 'fp', 'ADE', 'FDE', 'MR']
         all_metric_dict = {}
         for met in motion_metric_names:
             for cls in motion_cls_names:
@@ -1790,15 +1797,28 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
         alpha = 0.5
 
         for i in range(len(results)):
+            metric_results = results[i]['metric_results']
             for key in all_metric_dict.keys():
-                all_metric_dict[key] += results[i]['metric_results'][key]
+                all_metric_dict[key] += metric_results[key]
         
         for cls in motion_cls_names:
-            result_dict['EPA_'+cls] = (all_metric_dict['hit_'+cls] - \
-                 alpha * all_metric_dict['fp_'+cls]) / all_metric_dict['gt_'+cls]
+            result_dict['EPA_'+cls] = (all_metric_dict['hit_'+cls] - alpha * all_metric_dict['fp_'+cls]) / all_metric_dict['gt_'+cls]
             result_dict['ADE_'+cls] = all_metric_dict['ADE_'+cls] / all_metric_dict['cnt_ade_'+cls]
             result_dict['FDE_'+cls] = all_metric_dict['FDE_'+cls] / all_metric_dict['cnt_fde_'+cls]
             result_dict['MR_'+cls] = all_metric_dict['MR_'+cls] / all_metric_dict['cnt_fde_'+cls]
+        
+        # 加入description
+        for i in range(len(results)):
+            metric_results = results[i]['metric_results']
+            for key in metric_results.keys():
+                if key.startswith('description_'):
+                    if not key in all_metric_dict:
+                        all_metric_dict[key] = []
+                    all_metric_dict[key].append(metric_results[key])
+
+        for k in all_metric_dict:
+            if k.startswith('description_'):
+                result_dict[k] = sum(all_metric_dict[k]) / len(all_metric_dict[k])
         
         print('\n')
         print('-------------- Motion Prediction --------------')

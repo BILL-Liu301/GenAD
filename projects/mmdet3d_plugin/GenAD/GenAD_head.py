@@ -1856,10 +1856,16 @@ class GenADHead(DETRHead):
         loss_dict['loss_vae_gen'] = self.loss_vae_gen(distribution_pred)
 
         # 计算CLIP的loss
-        loss_description = []
-        for k in gt_descriptions:
+        loss_description = self.loss_description(vlm_descriptions, gt_descriptions)
+        loss_dict['loss_clip'] = sum(loss_description.values())
+
+        return loss_dict
+
+    def loss_description(self, vlm_descriptions, gt_descriptions):
+        loss_description = {}
+        for k in vlm_descriptions:
+            gt_d = gt_descriptions[f'{k}_one_hot'].argmax(dim=-1).long()
             # 此处的维度有点问题，暂时不管它
-            gt_d = gt_descriptions[k].argmax(dim=-1).long()
             if len(gt_d.shape) == 2:
                 gt_d = gt_d.flatten(0, 1)
             elif len(gt_d.shape) == 3:
@@ -1867,16 +1873,14 @@ class GenADHead(DETRHead):
             else:
                 raise NotImplementedError
             vlm_d = vlm_descriptions[k].flatten(0, 1)
-            loss_description.append(
-                F.cross_entropy(
+            loss_description.update({
+                k: F.cross_entropy(
                     vlm_d, 
                     gt_d, 
                     reduction='mean'
                 )
-            )
-        loss_dict['loss_clip'] = sum(loss_description)
-
-        return loss_dict
+            })
+        return loss_description
 
     @force_fp32(apply_to=('preds_dicts'))
     def get_bboxes(self, preds_dicts, img_metas, rescale=False):
@@ -2124,6 +2128,7 @@ class GenADHead(DETRHead):
         # sample = mu + sigma * noise  # [1, 1, 32]
 
         # 计算未来的分布
+        future_mu, future_log_sigma = None, None
         if future_distribution_inputs is not None:
             # 训练阶段
             # Concatenate future labels to z_t
@@ -2261,4 +2266,20 @@ class GenADHead(DETRHead):
 
         # 在输入的时候，hidden_states = current_states
         # 同上，我感觉此处的reshape很奇怪
-        hidden_state = hidden_states.reshape(self
+        hidden_state = hidden_states.reshape(self.layer_dim, -1, int(self.embed_dims / 2))  # [1, 1801, 512] -> [4, 1801, 128]
+        
+        # 此处这个self.predict_model包含了GRU
+        future_states = self.predict_model(  # [6, 1801, 512]
+            future_prediction_input,  # [6, 1801, 32]
+            hidden_state  # [4, 1801, 128]
+        )
+
+        current_states_hs = current_states.unsqueeze(0).repeat(self.fut_ts, 1, 1, 1)  # [1, 1801, 512] -> [1, 1, 1801, 512] -> [6, 1, 1801, 512]
+        future_states_hs = future_states.reshape(self.fut_ts, batch_size, -1, future_states.shape[2])  # [6, 1801, 512] -> [6, 1, 1801, 512]
+
+        if self.with_cur:
+            states_hs = torch.cat((current_states_hs, future_states_hs), dim=-1)  # [6, 1, 1801, 1024]
+        else:
+            states_hs = future_states_hs
+
+        return states_hs, future_states_hs

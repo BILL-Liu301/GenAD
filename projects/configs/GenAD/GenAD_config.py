@@ -329,7 +329,8 @@ train_pipeline = [
     dict(type='CustomCollect3D',\
          keys=['gt_bboxes_3d', 'gt_labels_3d', 'img', 'ego_his_trajs',
                'ego_fut_trajs', 'ego_fut_masks', 'ego_fut_cmd', 'ego_lcf_feat', 'gt_attr_labels',
-               'road_type', 'traffic_condition'
+               'road_type', 'road_type_one_hot', 'road_type_all',
+                'traffic_condition', 'traffic_condition_one_hot', 'traffic_condition_all'
                ])
 ]
 
@@ -357,7 +358,10 @@ test_pipeline = [
             dict(type='CustomCollect3D',\
                  keys=['points', 'gt_bboxes_3d', 'gt_labels_3d', 'img', 'fut_valid_flag',
                        'ego_his_trajs', 'ego_fut_trajs', 'ego_fut_masks', 'ego_fut_cmd',
-                       'ego_lcf_feat', 'gt_attr_labels'])])
+                       'ego_lcf_feat', 'gt_attr_labels',
+                       'road_type', 'road_type_one_hot', 'road_type_all',
+                        'traffic_condition', 'traffic_condition_one_hot', 'traffic_condition_all'
+                    ])])
 ]
 
 data = dict(

@@ -238,8 +238,8 @@ def main():
         model = MMDataParallel(model, device_ids=[0])
         print('Testing For Origin Dataset ...')
         outputs = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=False)
-        print('Testing With Change Cmd ...')
-        outputs_change_cmd = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=True)
+        # print('Testing With Change Cmd ...')
+        # outputs_change_cmd = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=True)
     else:
         assert False
         model = MMDistributedDataParallel(
@@ -251,7 +251,7 @@ def main():
 
     tmp = {}
     tmp['bbox_results'] = outputs
-    tmp['bbox_results_change_cmd'] = outputs_change_cmd
+    # tmp['bbox_results_change_cmd'] = outputs_change_cmd
     outputs = tmp
     rank, _ = get_dist_info()
     assert rank == 0
@@ -290,9 +290,9 @@ def main():
             print('Dealing with Result ...')
             with contextlib.redirect_stdout(f):
                 results_dict = dataset.evaluate(outputs['bbox_results'], 'results_nusc', **eval_kwargs)
-            print('Dealing with Result Change CMD ...')
-            with contextlib.redirect_stdout(f):
-                results_dict_change_cmd = dataset.evaluate(outputs['bbox_results_change_cmd'], 'results_nusc_change_cmd', **eval_kwargs)
+            # print('Dealing with Result Change CMD ...')
+            # with contextlib.redirect_stdout(f):
+            #     results_dict_change_cmd = dataset.evaluate(outputs['bbox_results_change_cmd'], 'results_nusc_change_cmd', **eval_kwargs)
     
         # # # NOTE: record to json
         # json_path = args.json_dir

@@ -252,7 +252,7 @@ def get_road_type(nusc, map_location, ego_pose):
     types = ['free road', 'intersection','straight road', 'curved road']
     road_type_one_hot = np.array([1 if road_type == t else 0 for t in types])
 
-    return road_type, road_type_one_hot
+    return road_type, road_type_one_hot, types
 
 def get_traffic_condition(agents, names):
     def cal_num_in_range(range_lon, range_lat):
@@ -295,7 +295,7 @@ def get_traffic_condition(agents, names):
     # plt.gca().set_aspect('equal')
     # plt.close(fig)
 
-    return traffic_condition, traffic_condition_one_hot
+    return traffic_condition, traffic_condition_one_hot, types
 
 def _fill_trainval_infos(nusc: NuScenes,
                          nusc_can_bus,
@@ -383,8 +383,12 @@ def _fill_trainval_infos(nusc: NuScenes,
         }
 
         # 获取当前ego所在的道路类型
-        road_type, road_type_one_hot = get_road_type(nusc, map_location, pose_record)
-        info['gt_descriptions'].update({'road_type': road_type_one_hot.astype(np.float32)})
+        road_type, road_type_one_hot, road_type_all = get_road_type(nusc, map_location, pose_record)
+        info['gt_descriptions'].update({
+            'road_type': road_type,
+            'road_type_one_hot': road_type_one_hot.astype(np.float32),
+            'road_type_all': road_type_all
+        })
 
         # 当 sample['next'] == '' 时，表示当前帧为最后一帧，需要将 frame_idx 重置为 0
         if sample['next'] == '':
@@ -606,7 +610,7 @@ def _fill_trainval_infos(nusc: NuScenes,
                 raise ValueError('x_end out of range')
 
             # 获取当前道路交通情况
-            traffic_condition, traffic_condition_one_hot = get_traffic_condition(agent_lcf_feat, names)
+            traffic_condition, traffic_condition_one_hot, traffic_condition_all = get_traffic_condition(agent_lcf_feat, names)
 
             # offset from lcf -> per-step offset
             ego_fut_trajs = ego_fut_trajs[1:] - ego_fut_trajs[:-1]
@@ -681,7 +685,11 @@ def _fill_trainval_infos(nusc: NuScenes,
             info['gt_ego_fut_masks'] = ego_fut_masks[1:].astype(np.float32)
             info['gt_ego_fut_cmd'] = command.astype(np.float32)  # 指令
             info['gt_ego_lcf_feat'] = ego_lcf_feat.astype(np.float32)
-            info['gt_descriptions'].update({'traffic_condition': traffic_condition_one_hot.astype(np.float32)})
+            info['gt_descriptions'].update({
+                'traffic_condition': traffic_condition,
+                'traffic_condition_one_hot': traffic_condition_one_hot.astype(np.float32),
+                'traffic_condition_all': traffic_condition_all
+            })
 
         if sample['scene_token'] in train_scenes:
             train_nusc_infos.append(info)

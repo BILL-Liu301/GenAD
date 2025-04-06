@@ -541,19 +541,38 @@ def visualize_sample(nusc: NuScenes,
     plt.xlim(xmin=-30, xmax=30)
     plt.ylim(ymin=-30, ymax=30)
 
-    # 展示Cmd
-    cmd = data_input['ego_fut_cmd'][0].data[0].argmax().cpu().numpy()
-    cmd_name = ''
-    if cmd == 0:
-        cmd_name = 'Turn Right'
-    elif cmd == 1:
-        cmd_name = 'Turn Left'
-    elif cmd == 2:
-        cmd_name = 'Forward'
-    elif cmd == 3:
-        assert False, 'Error: Unknown cmd!'
+    # # 展示Cmd
+    # cmd = data_input['ego_fut_cmd'][0].data[0].argmax().cpu().numpy()
+    # cmd_name = ''
+    # if cmd == 0:
+    #     cmd_name = 'Turn Right'
+    # elif cmd == 1:
+    #     cmd_name = 'Turn Left'
+    # elif cmd == 2:
+    #     cmd_name = 'Forward'
+    # elif cmd == 3:
+    #     assert False, 'Error: Unknown cmd!'
+    # bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3')
+    # plt.text(0.0, 0.0, cmd_name, ha='center', va='center', bbox=bbox)
+
+    # 展示description
+    description_results = pred_data['description_results'][sample_token]
+    description_vlm = description_results['vlm']
+    description_gt = description_results['gt']
+    description_text = ''
+    for k in description_vlm:
+        description_text += f'{k} ({description_gt[k].item()}):\n'
+        k_all = description_gt[f'{k}_all'].squeeze(0).squeeze(0)
+        k_prob = description_vlm[k].squeeze(0).squeeze(0)
+        assert len(k_all.shape) == len(k_prob.shape) == 1
+        for name, prob in zip(k_all, k_prob):
+            assert len(name) <= 15
+            name_ = name.ljust(15)
+            pb = f'{prob * 100:.2f} %'
+            description_text += f'{name_}: {pb}\n'
+    description_text = description_text.rstrip()
     bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3')
-    plt.text(0.0, 0.0, cmd_name, ha='center', va='center', bbox=bbox)
+    plt.text(-30.0, 30.0, description_text, ha='left', va='top', bbox=bbox, fontsize=7)
 
     # Show Pred Map
 
@@ -922,8 +941,8 @@ def run(sample_token_list, results_, results_input_, out_path, video_name):
                 raise ValueError("Error: Unknown sensor modality!")
 
         plan_cmd = np.argmax(results_['plan_results'][sample_token][1][0,0,0])
-        cmd_list = ['Turn Right', 'Turn Left', 'Go Straight']
-        plan_cmd_str = cmd_list[plan_cmd]
+        # cmd_list = ['Turn Right', 'Turn Left', 'Go Straight']
+        # plan_cmd_str = cmd_list[plan_cmd]
         pred_img = cv2.copyMakeBorder(pred_img, 10, 10, 10, 10, cv2.BORDER_CONSTANT, None, value = 0)
         # font
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -964,23 +983,23 @@ if __name__ == '__main__':
     args = parse_args()
     inference_result_path = args.result_path
     inference_result_input_path = args.result_input_path
-    inference_result_change_cmd_path = args.result_change_cmd_path
-    inference_result_change_cmd_input_path = args.result_change_cmd_input_path
+    # inference_result_change_cmd_path = args.result_change_cmd_path
+    # inference_result_change_cmd_input_path = args.result_change_cmd_input_path
     out_path = args.save_path
 
     # 获取原始结果和改变了指令的结果
     results_origin = mmcv.load(inference_result_path)
     results_origin_input = mmcv.load(inference_result_input_path)['input']
-    results_change_cmd = mmcv.load(inference_result_change_cmd_path)
-    results_change_cmd_input = mmcv.load(inference_result_change_cmd_input_path)['input']
+    # results_change_cmd = mmcv.load(inference_result_change_cmd_path)
+    # results_change_cmd_input = mmcv.load(inference_result_change_cmd_input_path)['input']
 
-    # results_origin和results_change_cmd中result的key是一样的
-    assert list(results_origin['results'].keys()) == list(results_change_cmd['results'].keys())
+    # # results_origin和results_change_cmd中result的key是一样的
+    # assert list(results_origin['results'].keys()) == list(results_change_cmd['results'].keys())
     sample_token_list = list(results_origin['results'].keys())
 
     nusc = NuScenes(version='v1.0-mini', dataroot='/workspace/genad/GenAD/data/nuscenes', verbose=True)
     
     print('Visualizing for resuls_origin')
     run(sample_token_list, results_origin, results_origin_input, out_path, 'results_origin.mp4')
-    print('Visualizing for resuls_change_cmd')
-    run(sample_token_list, results_change_cmd, results_change_cmd_input, out_path, 'results_change_cmd.mp4')
+    # print('Visualizing for resuls_change_cmd')
+    # run(sample_token_list, results_change_cmd, results_change_cmd_input, out_path, 'results_change_cmd.mp4')

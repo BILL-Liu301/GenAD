@@ -11,7 +11,7 @@ from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
 from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 from projects.mmdet3d_plugin.GenAD.planner.metric_stp3 import PlanningMetric
 
-from .CLIP_head import CLIPHead
+from .Description_head import DescriptionHead
 
 @DETECTORS.register_module()
 class GenAD(MVXTwoStageDetector):
@@ -51,7 +51,7 @@ class GenAD(MVXTwoStageDetector):
         self.fut_ts = fut_ts
         self.fut_mode = fut_mode
         self.valid_fut_ts = pts_bbox_head['valid_fut_ts']
-        self.clip_head = CLIPHead("cuda")
+        self.description_head = DescriptionHead("cuda")
 
         # temporal
         self.video_test_mode = video_test_mode
@@ -259,7 +259,7 @@ class GenAD(MVXTwoStageDetector):
         for des in kwargs['description_answer']:
             des = des.item()
             des = des.split('<answer>')[1].split('<|endofchunk|>')[0]  # 只取精华
-            des_feat = self.clip_head(des, prev_bev.device).to(prev_bev.dtype)
+            des_feat = self.description_head(des, prev_bev.device).to(prev_bev.dtype)
             description_feat.append(des_feat)
         description_feat = torch.cat(description_feat, dim=0)
 

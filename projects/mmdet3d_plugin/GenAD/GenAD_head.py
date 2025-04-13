@@ -256,7 +256,6 @@ class GenADHead(DETRHead):
         self.map_code_weights = nn.Parameter(torch.tensor(self.map_code_weights, requires_grad=False), requires_grad=False)
 
         # cross-attention，vlm提取的特征和motion_query之间
-        self.description_motion_mlp = nn.Linear(512, self.embed_dims)
         # self.vlm_motion_sa = nn.TransformerDecoder(
         #     nn.TransformerDecoderLayer(
         #         d_model=self.embed_dims,
@@ -724,7 +723,6 @@ class GenADHead(DETRHead):
         # 重点关注对象
 
         # 将从vlm中提取特征降低维度，进行对齐
-        description_feat = self.description_motion_mlp(description_feat.to(dtype))  # [B, n, 512] -> [B, n, 256]
         description_feat = description_feat.permute(1, 0, 2)  # [n, B, 256]
 
         # motion query
@@ -775,7 +773,9 @@ class GenADHead(DETRHead):
             motion_query_fuse = self.description_motion_ca(
                 query=motion_query,
                 key=description_feat,
-                value=description_feat
+                value=description_feat,
+                query_pos=motion_pos,  # [1801, 1, 256]
+                key_padding_mask=invalid_motion_idx
             )
 
             # 此处的decoder就是TransformerDecoder
@@ -824,10 +824,12 @@ class GenADHead(DETRHead):
 
                 # 将map_query和vlm提取的特征进行特征融合
                 map_query_fuse = self.description_map_ca(
-                    query=map_query,
-                    key=description_feat.repeat(1, map_query.shape[1], 1),
-                    value=description_feat.repeat(1, map_query.shape[1], 1)
-                )
+                    query=map_query.permute(1, 0, 2),
+                    key=description_feat,
+                    value=description_feat,
+                    query_pos=motion_pos,  # [1, 1801, 256]
+                    key_padding_mask=key_padding_mask  # [1801, 1]
+                ).permute(1, 0, 2)
 
                 # 此处的decoder就是TransformerDecoder
                 # 公式6

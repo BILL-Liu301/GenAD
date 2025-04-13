@@ -256,7 +256,7 @@ class GenADHead(DETRHead):
         self.map_code_weights = nn.Parameter(torch.tensor(self.map_code_weights, requires_grad=False), requires_grad=False)
 
         # cross-attention，vlm提取的特征和motion_query之间
-        self.vlm_motion_mlp = nn.Linear(512, self.embed_dims)
+        self.description_motion_mlp = nn.Linear(512, self.embed_dims)
         # self.vlm_motion_sa = nn.TransformerDecoder(
         #     nn.TransformerDecoderLayer(
         #         d_model=self.embed_dims,
@@ -264,7 +264,7 @@ class GenADHead(DETRHead):
         #     ),
         #     num_layers=2
         # )
-        self.vlm_motion_sa = build_transformer_layer_sequence(dict(
+        self.description_motion_ca = build_transformer_layer_sequence(dict(
             type='CustomTransformerDecoder',
             num_layers=1,
             return_intermediate=False,
@@ -291,7 +291,7 @@ class GenADHead(DETRHead):
         #     ),
         #     num_layers=2
         # )
-        self.vlm_map_sa = build_transformer_layer_sequence(dict(
+        self.description_map_ca = build_transformer_layer_sequence(dict(
             type='CustomTransformerDecoder',
             num_layers=1,
             return_intermediate=False,
@@ -586,7 +586,7 @@ class GenADHead(DETRHead):
                 gt_attr_labels=None,
                 ego_fut_trajs=None,
                 ego_fut_cmd=None,
-                vlm_img_feats=None
+                description_feat=None
                 ):
         """Forward function.
         Args:
@@ -724,8 +724,8 @@ class GenADHead(DETRHead):
         # 重点关注对象
 
         # 将从vlm中提取特征降低维度，进行对齐
-        vlm_feats = self.vlm_motion_mlp(vlm_img_feats.to(dtype))  # [B, n, 512] -> [B, n, 256]
-        vlm_feats = vlm_feats.permute(1, 0, 2)  # [n, B, 256]
+        description_feat = self.description_motion_mlp(description_feat.to(dtype))  # [B, n, 512] -> [B, n, 256]
+        description_feat = description_feat.permute(1, 0, 2)  # [n, B, 256]
 
         # motion query
         if self.motion_decoder is not None:
@@ -770,24 +770,12 @@ class GenADHead(DETRHead):
             # ego <-> agent Interaction
             motion_query = torch.cat([motion_query, ego_query], dim=0)  # [1801, 1, 256]
             motion_pos = torch.cat([motion_pos, ego_pos_emb], dim=0)  # [1801, 1, 256]
-            # # 将指令进行特征提取
-            # cmd = ego_fut_cmd.argmax().expand(1, 1)  # [1, 1, 3] -> [1, 1]
-            # cmd_query = self.cmd_query(cmd)  # [1, 1, 256]
-            # cmd_pos = self.cmd_pos(cmd)  # [1, 1, 256]
-            # # cmd_motion_query和cmd_motion_pos分别与motion_query和motion_pos进行拼接并特征融合
-            # cmd_ego_query = torch.cat([cmd_query, ego_query], dim=-1)  # [1, 1, 512]
-            # cmd_ego_pos = torch.cat([cmd_pos, ego_pos_emb], dim=-1)  # [1, 1, 512]
-            # cmd_ego_query = self.cmd_query_mlp(cmd_ego_query)  # [1, 1, 256]
-            # cmd_ego_pos = self.cmd_pos_mlp(cmd_ego_pos)  # [1, 1, 256]
-            # # 并入motion_query和motion_pos中
-            # motion_query = torch.cat([motion_query, cmd_ego_query], dim=0)  # [1801, 1, 256]
-            # motion_pos = torch.cat([motion_pos, cmd_ego_pos], dim=0)  # [1801, 1, 256]
 
             # 将motion_query和vlm提取的特征进行特征融合
-            motion_query_fuse = self.vlm_motion_sa(
+            motion_query_fuse = self.description_motion_ca(
                 query=motion_query,
-                key=vlm_feats,
-                value=vlm_feats
+                key=description_feat,
+                value=description_feat
             )
 
             # 此处的decoder就是TransformerDecoder
@@ -835,10 +823,10 @@ class GenADHead(DETRHead):
                     motion_pos, map_pos = None, None
 
                 # 将map_query和vlm提取的特征进行特征融合
-                map_query_fuse = self.vlm_map_sa(
+                map_query_fuse = self.description_map_ca(
                     query=map_query,
-                    key=vlm_feats.repeat(1, map_query.shape[1], 1),
-                    value=vlm_feats.repeat(1, map_query.shape[1], 1)
+                    key=description_feat.repeat(1, map_query.shape[1], 1),
+                    value=description_feat.repeat(1, map_query.shape[1], 1)
                 )
 
                 # 此处的decoder就是TransformerDecoder
@@ -1657,9 +1645,7 @@ class GenADHead(DETRHead):
              gt_attr_labels,
              gt_bboxes_ignore=None,
              map_gt_bboxes_ignore=None,
-             img_metas=None,
-             vlm_descriptions=None,
-             gt_descriptions=None
+             img_metas=None
             ):
         """"Loss function.
         Args:
@@ -1855,32 +1841,7 @@ class GenADHead(DETRHead):
 
         loss_dict['loss_vae_gen'] = self.loss_vae_gen(distribution_pred)
 
-        # 计算CLIP的loss
-        loss_description = self.loss_description(vlm_descriptions, gt_descriptions)
-        loss_dict.update(loss_description)
-
         return loss_dict
-
-    def loss_description(self, vlm_descriptions, gt_descriptions):
-        loss_description = {}
-        for k in vlm_descriptions:
-            gt_d = gt_descriptions[f'{k}_one_hot'].argmax(dim=-1).long()
-            # 此处的维度有点问题，暂时不管它
-            if len(gt_d.shape) == 2:
-                gt_d = gt_d.flatten(0, 1)
-            elif len(gt_d.shape) == 3:
-                gt_d = gt_d.squeeze(0).flatten(0, 1)
-            else:
-                raise NotImplementedError
-            vlm_d = vlm_descriptions[k].flatten(0, 1)
-            loss_description.update({
-                k: F.cross_entropy(
-                    vlm_d, 
-                    gt_d, 
-                    reduction='mean'
-                )
-            })
-        return loss_description
 
     @force_fp32(apply_to=('preds_dicts'))
     def get_bboxes(self, preds_dicts, img_metas, rescale=False):

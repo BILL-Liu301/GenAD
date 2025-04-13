@@ -329,8 +329,9 @@ train_pipeline = [
     dict(type='CustomCollect3D',\
          keys=['gt_bboxes_3d', 'gt_labels_3d', 'img', 'ego_his_trajs',
                'ego_fut_trajs', 'ego_fut_masks', 'ego_fut_cmd', 'ego_lcf_feat', 'gt_attr_labels',
-               'road_type', 'road_type_one_hot', 'road_type_all',
-                'traffic_condition', 'traffic_condition_one_hot', 'traffic_condition_all'
+            #    'road_type', 'road_type_one_hot', 'road_type_all',
+            #    'traffic_condition', 'traffic_condition_one_hot', 'traffic_condition_all',
+               'description_question', 'description_answer'
                ])
 ]
 
@@ -359,8 +360,9 @@ test_pipeline = [
                  keys=['points', 'gt_bboxes_3d', 'gt_labels_3d', 'img', 'fut_valid_flag',
                        'ego_his_trajs', 'ego_fut_trajs', 'ego_fut_masks', 'ego_fut_cmd',
                        'ego_lcf_feat', 'gt_attr_labels',
-                       'road_type', 'road_type_one_hot', 'road_type_all',
-                        'traffic_condition', 'traffic_condition_one_hot', 'traffic_condition_all'
+                    #    'road_type', 'road_type_one_hot', 'road_type_all',
+                    #    'traffic_condition', 'traffic_condition_one_hot', 'traffic_condition_all',
+                       'description_question', 'description_answer'
                     ])])
 ]
 
@@ -370,7 +372,8 @@ data = dict(
     train=dict(
         type=dataset_type,
         data_root=data_root,
-        ann_file=data_root_ + 'vad_nuscenes_infos_temporal_train.pkl',
+        # ann_file=data_root_ + 'vad_nuscenes_infos_temporal_train.pkl',
+        ann_file=data_root_ + 'vad_nuscenes_infos_temporal_train_with_description.pkl',
         # ann_file=data_root_ + 'genad_nuscenes_infos_train.pkl',
         pipeline=train_pipeline,
         classes=class_names,
@@ -390,7 +393,8 @@ data = dict(
     val=dict(type=dataset_type,
              pc_range=point_cloud_range,
              data_root=data_root,
-             ann_file=data_root_ + 'vad_nuscenes_infos_temporal_val.pkl',
+            #  ann_file=data_root_ + 'vad_nuscenes_infos_temporal_val.pkl',
+             ann_file=data_root_ + 'vad_nuscenes_infos_temporal_val_with_description.pkl',
             #  ann_file=data_root_ + 'genad_nuscenes_infos_val.pkl',
              pipeline=test_pipeline,  bev_size=(bev_h_, bev_w_),
              classes=class_names, modality=input_modality, samples_per_gpu=1,

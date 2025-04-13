@@ -123,9 +123,7 @@ class GenAD(MVXTwoStageDetector):
                           ego_fut_cmd=None,
                           ego_lcf_feat=None,
                           gt_attr_labels=None,
-                          vlm_img_feats=None,
-                          vlm_descriptions=None,
-                          gt_descriptions=None
+                          description_feat=None
                           ):
         """Forward function'
         Args:
@@ -148,7 +146,7 @@ class GenAD(MVXTwoStageDetector):
             ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,
             gt_labels_3d=gt_labels_3d, gt_attr_labels=gt_attr_labels,
             ego_fut_trajs=ego_fut_trajs, ego_fut_cmd=ego_fut_cmd,
-            vlm_img_feats=vlm_img_feats
+            description_feat=description_feat
         )
 
         # 计算loss
@@ -157,9 +155,7 @@ class GenAD(MVXTwoStageDetector):
             outs, ego_fut_trajs, ego_fut_masks, ego_fut_cmd, gt_attr_labels
         ]
         losses = self.pts_bbox_head.loss(
-            *loss_inputs, 
-            vlm_descriptions=vlm_descriptions,
-            gt_descriptions=gt_descriptions,
+            *loss_inputs,
             img_metas=img_metas
         )
         return losses
@@ -258,14 +254,14 @@ class GenAD(MVXTwoStageDetector):
         prev_img_metas = copy.deepcopy(img_metas)
         prev_bev = self.obtain_history_bev(prev_img, prev_img_metas) if len_queue > 1 else None  # 先self.extract_feat后self.pts_bbox_head
 
-        # 从当前图像中获取当前特征信息
-        vlm_img_feats, vlm_descriptions = self.clip_head(img)
-
-        # 合并gt_descriptions
-        gt_descriptions = {
-            'road_type_one_hot': flatten_data_from_list(kwargs['road_type_one_hot']),
-            'traffic_condition_one_hot': flatten_data_from_list(kwargs['traffic_condition_one_hot'])
-        }
+        # 将description_answer转换为description_feat
+        description_feat = []
+        for des in kwargs['description_answer']:
+            des = des.item()
+            des = des.split('<answer>')[1].split('<|endofchunk|>')[0]  # 只取精华
+            des_feat = self.clip_head(des, prev_bev.device).to(prev_bev.dtype)
+            description_feat.append(des_feat)
+        description_feat = torch.cat(description_feat, dim=0)
 
         # 提取图像特征
         img_metas = [each[len_queue-1] for each in img_metas]
@@ -281,7 +277,7 @@ class GenAD(MVXTwoStageDetector):
             ego_his_trajs=ego_his_trajs, ego_fut_trajs=ego_fut_trajs,
             ego_fut_masks=ego_fut_masks, ego_fut_cmd=ego_fut_cmd,
             ego_lcf_feat=ego_lcf_feat, gt_attr_labels=gt_attr_labels,
-            vlm_img_feats=vlm_img_feats, vlm_descriptions=vlm_descriptions, gt_descriptions=gt_descriptions
+            description_feat=description_feat
         )
 
         losses.update(losses_pts)

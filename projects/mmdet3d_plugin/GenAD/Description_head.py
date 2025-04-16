@@ -2,14 +2,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from CLIP import clip
+import clip
 
 class DescriptionHead(nn.Module):
-    def __init__(self, device):
+    def __init__(self):
         super(DescriptionHead, self).__init__()
         self.dtype = torch.float32
 
-        model, _ = clip.load('ViT-B/32', device)
+        model, _ = clip.load('ViT-B/32')
         model = model.train()
         model = model.to(self.dtype)
 
@@ -17,7 +17,7 @@ class DescriptionHead(nn.Module):
         self.positional_embedding = model.positional_embedding
         self.transformer = model.transformer
         self.ln_final = model.ln_final
-        self.text_projection = model.text_projection
+        # self.text_projection = model.text_projection
         self.mlp = nn.Sequential(
             nn.Linear(512, 512, dtype=self.dtype),
             nn.ReLU(),
@@ -29,12 +29,7 @@ class DescriptionHead(nn.Module):
 
     def forward(self, description, device):
         assert isinstance(description, str)
-        # # 按照句号分隔开
-        # tokenize = clip.tokenize(description.split('. '))
-        # 直接丢进去
-        assert len(description.split('. ')) <= 77
-        tokenize = clip.tokenize(description)
-
+        tokenize = clip.tokenize(description, truncate=True)
         text_feat = self.encode_text(tokenize.to(device))
         return text_feat
 

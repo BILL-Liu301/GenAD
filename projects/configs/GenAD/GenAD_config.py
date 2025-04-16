@@ -312,8 +312,8 @@ model = dict(
             pc_range=point_cloud_range))))
 
 dataset_type = 'GenADCustomNuScenesDataset'
-data_root = '/workspace/genad/GenAD/data/nuscenes/'
-data_root_ = '/workspace/genad/GenAD/data/nuscenes/'
+data_root = 'data/nuscenes/'
+data_root_ = 'data/nuscenes/'
 file_client_args = dict(backend='disk')
 
 train_pipeline = [

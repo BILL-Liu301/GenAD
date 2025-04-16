@@ -825,10 +825,9 @@ class GenADHead(DETRHead):
                 # 将map_query和vlm提取的特征进行特征融合
                 map_query_fuse = self.description_map_ca(
                     query=map_query.permute(1, 0, 2),
-                    key=description_feat,
-                    value=description_feat,
-                    query_pos=motion_pos,  # [1, 1801, 256]
-                    key_padding_mask=key_padding_mask  # [1801, 1]
+                    key=description_feat.repeat(1, map_query.shape[0], 1),
+                    value=description_feat.repeat(1, map_query.shape[0], 1),
+                    query_pos=motion_pos.permute(1, 0, 2),
                 ).permute(1, 0, 2)
 
                 # 此处的decoder就是TransformerDecoder

@@ -164,3 +164,5 @@ cython_debug/
 /data/*
 /ckpts/*
 /visualization/testresults/*
+.vscode/*
+outputs_with_cmd/*

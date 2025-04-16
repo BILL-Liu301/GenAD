@@ -51,7 +51,7 @@ class GenAD(MVXTwoStageDetector):
         self.fut_ts = fut_ts
         self.fut_mode = fut_mode
         self.valid_fut_ts = pts_bbox_head['valid_fut_ts']
-        self.description_head = DescriptionHead("cuda")
+        self.description_head = DescriptionHead()
 
         # temporal
         self.video_test_mode = video_test_mode

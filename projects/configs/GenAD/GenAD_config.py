@@ -42,7 +42,8 @@ _num_levels_ = 1
 bev_h_ = 100
 bev_w_ = 100
 queue_length = 3 # each sequence contains `queue_length` frames.
-total_epochs = 200
+total_epochs = 50
+use_description = True
 
 model = dict(
     type='GenAD',
@@ -66,6 +67,10 @@ model = dict(
         add_extra_convs='on_output',
         num_outs=_num_levels_,
         relu_before_extra_convs=True),
+    description_head=dict(
+        type='DescriptionHead',
+        use=use_description,
+    ),
     pts_bbox_head=dict(
         type='GenADHead',
         map_thresh=0.5,
@@ -128,6 +133,39 @@ model = dict(
                 ffn_dropout=0.1,
                 operation_order=('cross_attn', 'norm', 'ffn', 'norm'))),
         motion_map_decoder=dict(
+            type='CustomTransformerDecoder',
+            num_layers=1,
+            return_intermediate=False,
+            transformerlayers=dict(
+                type='BaseTransformerLayer',
+                attn_cfgs=[
+                    dict(
+                        type='MultiheadAttention',
+                        embed_dims=_dim_,
+                        num_heads=8,
+                        dropout=0.1),
+                ],
+                feedforward_channels=_ffn_dim_,
+                ffn_dropout=0.1,
+                operation_order=('cross_attn', 'norm', 'ffn', 'norm'))),
+        use_description=use_description,
+        description_motion_ca=dict(
+            type='CustomTransformerDecoder',
+            num_layers=1,
+            return_intermediate=False,
+            transformerlayers=dict(
+                type='BaseTransformerLayer',
+                attn_cfgs=[
+                    dict(
+                        type='MultiheadAttention',
+                        embed_dims=_dim_,
+                        num_heads=8,
+                        dropout=0.1),
+                ],
+                feedforward_channels=_ffn_dim_,
+                ffn_dropout=0.1,
+                operation_order=('cross_attn', 'norm', 'ffn', 'norm'))),
+        description_map_ca=dict(
             type='CustomTransformerDecoder',
             num_layers=1,
             return_intermediate=False,
@@ -407,7 +445,8 @@ data = dict(
     test=dict(type=dataset_type,
               data_root=data_root,
               pc_range=point_cloud_range,
-              ann_file=data_root_ + 'vad_nuscenes_infos_temporal_val.pkl',
+            #  ann_file=data_root_ + 'vad_nuscenes_infos_temporal_val.pkl',
+              ann_file=data_root_ + 'vad_nuscenes_infos_temporal_val_with_description.pkl',
             #   ann_file=data_root_ + 'genad_nuscenes_infos_val.pkl',
               pipeline=test_pipeline, bev_size=(bev_h_, bev_w_),
               classes=class_names, modality=input_modality, samples_per_gpu=1,

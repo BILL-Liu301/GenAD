@@ -262,7 +262,7 @@ def get_predicted_data(sample_data_token: str,
     return data_path, box_list, cam_intrinsic
 
 
-def lidiar_render(sample_token, data, data_input, out_path=None, out_name=None, traj_use_perstep_offset=True):
+def lidiar_render(sample_token, data, out_path=None, out_name=None, traj_use_perstep_offset=True):
     bbox_gt_list = []
     bbox_pred_list = []
     sample_rec = nusc.get('sample', sample_token)
@@ -318,7 +318,7 @@ def lidiar_render(sample_token, data, data_input, out_path=None, out_name=None, 
     visualize_sample(
         nusc, sample_token, gt_annotations, pred_annotations,
         savepath=out_path, traj_use_perstep_offset=traj_use_perstep_offset, 
-        pred_data=data, data_input=data_input
+        pred_data=data
     )
 
 
@@ -506,8 +506,7 @@ def visualize_sample(nusc: NuScenes,
                      map_fixed_ptsnum_per_line=20,
                      gt_format=['fixed_num_pts'],
                      colors_plt = ['red', 'green', 'blue'], #['cornflowerblue', 'royalblue', 'slategrey'],
-                     pred_data = None,
-                     data_input=None) -> None:
+                     pred_data = None) -> None:
     """
     Visualizes a sample from BEV with annotations and detection results.
     :param nusc: NuScenes object.
@@ -540,39 +539,6 @@ def visualize_sample(nusc: NuScenes,
     fig, axes = plt.subplots(1, 1, figsize=(4, 4))
     plt.xlim(xmin=-30, xmax=30)
     plt.ylim(ymin=-30, ymax=30)
-
-    # # 展示Cmd
-    # cmd = data_input['ego_fut_cmd'][0].data[0].argmax().cpu().numpy()
-    # cmd_name = ''
-    # if cmd == 0:
-    #     cmd_name = 'Turn Right'
-    # elif cmd == 1:
-    #     cmd_name = 'Turn Left'
-    # elif cmd == 2:
-    #     cmd_name = 'Forward'
-    # elif cmd == 3:
-    #     assert False, 'Error: Unknown cmd!'
-    # bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3')
-    # plt.text(0.0, 0.0, cmd_name, ha='center', va='center', bbox=bbox)
-
-    # 展示description
-    description_results = pred_data['description_results'][sample_token]
-    description_vlm = description_results['vlm']
-    description_gt = description_results['gt']
-    description_text = ''
-    for k in description_vlm:
-        description_text += f'{k} ({description_gt[k].item()}):\n'
-        k_all = description_gt[f'{k}_all'].squeeze(0).squeeze(0)
-        k_prob = description_vlm[k].squeeze(0).squeeze(0)
-        assert len(k_all.shape) == len(k_prob.shape) == 1
-        for name, prob in zip(k_all, k_prob):
-            assert len(name) <= 15
-            name_ = name.ljust(15)
-            pb = f'{prob * 100:.2f} %'
-            description_text += f'{name_}: {pb}\n'
-    description_text = description_text.rstrip()
-    bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3')
-    plt.text(-30.0, 30.0, description_text, ha='left', va='top', bbox=bbox, fontsize=7)
 
     # Show Pred Map
 
@@ -751,7 +717,6 @@ def render_sample_data(
         verbose: bool = True,
         show_panoptic: bool = False,
         pred_data=None,
-        data_input=None,
         traj_use_perstep_offset: bool = True
       ) -> None:
     """
@@ -781,7 +746,7 @@ def render_sample_data(
         If show_lidarseg is True, show_panoptic will be set to False.
     """
     lidiar_render(
-        sample_toekn, pred_data, data_input, out_path=out_path,
+        sample_toekn, pred_data, out_path=out_path,
         out_name=out_name, traj_use_perstep_offset=traj_use_perstep_offset
     )
 
@@ -790,14 +755,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Visualize VAD predictions')
     parser.add_argument('--result_path', help='inference result file path')
     parser.add_argument('--result_input_path', help='input of inference result file path')
-    parser.add_argument('--result_change_cmd_path', help='inference result_change_cmd file path')
-    parser.add_argument('--result_change_cmd_input_path', help='input of inference result_change_cmd file path')
     parser.add_argument('--save_path', help='the dir to save visualization results')
     args = parser.parse_args()
 
     return args
 
-def run(sample_token_list, results_, results_input_, out_path, video_name):
+def run(sample_token_list, results_, out_path, video_name):
     fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
     video_path = osp.join(out_path, video_name)
     video = cv2.VideoWriter(video_path, fourcc, 10, (2933, 800), True)
@@ -808,7 +771,6 @@ def run(sample_token_list, results_, results_input_, out_path, video_name):
         render_sample_data(
             sample_token_list[id],
             pred_data=results_,
-            data_input=results_input_[id],
             out_path=out_path
         )
         pred_path = osp.join(out_path, 'bev_pred.png')
@@ -983,23 +945,20 @@ if __name__ == '__main__':
     args = parse_args()
     inference_result_path = args.result_path
     inference_result_input_path = args.result_input_path
-    # inference_result_change_cmd_path = args.result_change_cmd_path
-    # inference_result_change_cmd_input_path = args.result_change_cmd_input_path
     out_path = args.save_path
 
     # 获取原始结果和改变了指令的结果
     results_origin = mmcv.load(inference_result_path)
-    results_origin_input = mmcv.load(inference_result_input_path)['input']
-    # results_change_cmd = mmcv.load(inference_result_change_cmd_path)
-    # results_change_cmd_input = mmcv.load(inference_result_change_cmd_input_path)['input']
 
-    # # results_origin和results_change_cmd中result的key是一样的
-    # assert list(results_origin['results'].keys()) == list(results_change_cmd['results'].keys())
     sample_token_list = list(results_origin['results'].keys())
 
-    nusc = NuScenes(version='v1.0-mini', dataroot='/workspace/genad/GenAD/data/nuscenes', verbose=True)
+    nusc = NuScenes(version='v1.0-mini', dataroot='data/nuscenes', verbose=True)
     
     print('Visualizing for resuls_origin')
-    run(sample_token_list, results_origin, results_origin_input, out_path, 'results_origin.mp4')
-    # print('Visualizing for resuls_change_cmd')
-    # run(sample_token_list, results_change_cmd, results_change_cmd_input, out_path, 'results_change_cmd.mp4')
+    run(
+        sample_token_list, 
+        results_origin, 
+        out_path, 
+        'results_with_description.mp4'
+        # 'results_without_description.mp4'
+    )

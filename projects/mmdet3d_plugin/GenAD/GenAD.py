@@ -28,6 +28,7 @@ class GenAD(MVXTwoStageDetector):
                  img_neck=None,
                  pts_neck=None,
                  pts_bbox_head=None,
+                 description_head=None,
                  img_roi_head=None,
                  img_rpn_head=None,
                  train_cfg=None,
@@ -38,20 +39,24 @@ class GenAD(MVXTwoStageDetector):
                  fut_mode=6
                  ):
 
-        super(GenAD,
-              self).__init__(pts_voxel_layer, pts_voxel_encoder,
-                             pts_middle_encoder, pts_fusion_layer,
-                             img_backbone, pts_backbone, img_neck, pts_neck,
-                             pts_bbox_head, img_roi_head, img_rpn_head,
-                             train_cfg, test_cfg, pretrained)
-        self.grid_mask = GridMask(
-            True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
+        super(GenAD,self).__init__(
+            pts_voxel_layer, pts_voxel_encoder,
+            pts_middle_encoder, pts_fusion_layer,
+            img_backbone, pts_backbone, img_neck, pts_neck,
+            pts_bbox_head, img_roi_head, img_rpn_head,
+            train_cfg, test_cfg, pretrained
+        )
+        self.grid_mask = GridMask(True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
         self.use_grid_mask = use_grid_mask
         self.fp16_enabled = False
         self.fut_ts = fut_ts
         self.fut_mode = fut_mode
         self.valid_fut_ts = pts_bbox_head['valid_fut_ts']
-        self.description_head = DescriptionHead()
+        self.use_description = description_head['use']
+        if self.use_description:
+            self.description_head = DescriptionHead()
+        else:
+            self.description_head = None
 
         # temporal
         self.video_test_mode = video_test_mode
@@ -254,14 +259,17 @@ class GenAD(MVXTwoStageDetector):
         prev_img_metas = copy.deepcopy(img_metas)
         prev_bev = self.obtain_history_bev(prev_img, prev_img_metas) if len_queue > 1 else None  # 先self.extract_feat后self.pts_bbox_head
 
-        # 将description_answer转换为description_feat
-        description_feat = []
-        for des in kwargs['description_answer']:
-            des = des.item()
-            des = des.split('<answer>')[1].split('<|endofchunk|>')[0]  # 只取精华
-            des_feat = self.description_head(des, prev_bev.device).to(prev_bev.dtype)
-            description_feat.append(des_feat)
-        description_feat = torch.cat(description_feat, dim=0)
+        if self.use_description:
+            # 将description_answer转换为description_feat
+            description_feat = []
+            for des in kwargs['description_answer']:
+                des = des.item()
+                des = des.split('<answer>')[1].split('<|endofchunk|>')[0]  # 只取精华
+                des_feat = self.description_head(des, prev_bev.device).to(prev_bev.dtype)
+                description_feat.append(des_feat)
+            description_feat = torch.cat(description_feat, dim=0)
+        else:
+            description_feat = None
 
         # 提取图像特征
         img_metas = [each[len_queue-1] for each in img_metas]
@@ -361,17 +369,17 @@ class GenAD(MVXTwoStageDetector):
     ):
         """Test function without augmentaiton."""
 
-        # 从当前图像中获取当前特征信息
-        vlm_img_feats, vlm_descriptions = self.clip_head(img)
-        # 合并gt_descriptions
-        gt_descriptions = {
-            'road_type': flatten_data_from_list(kwargs['road_type']),
-            'road_type_one_hot': flatten_data_from_list(kwargs['road_type_one_hot']),
-            'road_type_all': flatten_data_from_list(kwargs['road_type_all']),
-            'traffic_condition': flatten_data_from_list(kwargs['traffic_condition']),
-            'traffic_condition_one_hot': flatten_data_from_list(kwargs['traffic_condition_one_hot']),
-            'traffic_condition_all': flatten_data_from_list(kwargs['traffic_condition_all'])
-        }
+        if self.use_description:
+            # 将description_answer转换为description_feat
+            description_feat = []
+            for des in kwargs['description_answer']:
+                des = flatten_data_from_list(des).item()
+                des = des.split('<answer>')[1].split('<|endofchunk|>')[0]  # 只取精华
+                des_feat = self.description_head(des, img.device).to(img.dtype)
+                description_feat.append(des_feat)
+            description_feat = torch.cat(description_feat, dim=0)
+        else:
+            description_feat = None
 
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
         bbox_list = [dict() for i in range(len(img_metas))]
@@ -390,9 +398,7 @@ class GenAD(MVXTwoStageDetector):
             ego_fut_cmd=ego_fut_cmd,
             ego_lcf_feat=ego_lcf_feat,
             gt_attr_labels=gt_attr_labels,
-            vlm_img_feats=vlm_img_feats,
-            vlm_descriptions=vlm_descriptions,
-            gt_descriptions=gt_descriptions
+            description_feat=description_feat
         )
         for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
             result_dict['pts_bbox'] = pts_bbox
@@ -415,9 +421,7 @@ class GenAD(MVXTwoStageDetector):
         ego_fut_cmd=None,
         ego_lcf_feat=None,
         gt_attr_labels=None,
-        vlm_img_feats=None,
-        vlm_descriptions=None,
-        gt_descriptions=None
+        description_feat=None
     ):
         """Test function"""
         mapped_class_names = [
@@ -430,7 +434,7 @@ class GenAD(MVXTwoStageDetector):
         outs = self.pts_bbox_head(
             x, img_metas, prev_bev=prev_bev,
             ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,ego_fut_cmd=ego_fut_cmd,
-            vlm_img_feats=vlm_img_feats
+            description_feat=description_feat
         )
         bbox_list = self.pts_bbox_head.get_bboxes(outs, img_metas, rescale=rescale)
 
@@ -443,8 +447,6 @@ class GenAD(MVXTwoStageDetector):
             bbox_result['ego_fut_preds'] = outs['ego_fut_preds'][i].cpu()
             bbox_result['ego_fut_cmd'] = ego_fut_cmd.cpu()
             bbox_results.append(bbox_result)
-        bbox_result['vlm_descriptions'] = {k: v.softmax(dim=-1).cpu().numpy() for k, v in vlm_descriptions.items()}
-        bbox_result['gt_descriptions'] = {k: v.cpu().numpy() if isinstance(v, torch.Tensor) else v for k, v in gt_descriptions.items()}
 
         assert len(bbox_results) == 1, 'only support batch_size=1 now'
         score_threshold = 0.6
@@ -488,10 +490,6 @@ class GenAD(MVXTwoStageDetector):
                 fut_valid_flag = fut_valid_flag
             )
             metric_dict.update(metric_dict_planner_stp3)
-
-            metric_ = self.pts_bbox_head.loss_description(vlm_descriptions, gt_descriptions)
-            metric_ = {f'description_{k}': v.cpu().item() for k, v in metric_.items()}
-            metric_dict.update(metric_)
 
         return outs['bev_embed'], bbox_results, metric_dict
 

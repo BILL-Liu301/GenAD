@@ -237,7 +237,7 @@ def main():
         # assert False
         model = MMDataParallel(model, device_ids=[0])
         print('Testing For Origin Dataset ...')
-        outputs = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=False)
+        outputs = single_gpu_test(model, data_loader, args.show, args.show_dir)
         # print('Testing With Change Cmd ...')
         # outputs_change_cmd = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=True)
     else:
@@ -266,7 +266,9 @@ def main():
         kwargs = {} if args.eval_options is None else args.eval_options
         kwargs['jsonfile_prefix'] = osp.join(
             # 'test', args.config.split('/')[-1].split('.')[-2], time.ctime().replace(' ', '_').replace(':', '_')
-            'test', args.config.split('/')[-1].split('.')[-2], 'results'
+            'test', args.config.split('/')[-1].split('.')[-2], 
+            'results_with_description'
+            # 'results_without_description'
         )
         if args.format_only:
             assert False

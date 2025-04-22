@@ -91,10 +91,10 @@ def create_nuscenes_infos(root_path,
     if version == 'v1.0-trainval':
         train_scenes = splits.train
         val_scenes = splits.val
-        # 手动减少数据量
-        import random
-        train_scenes = random.sample(train_scenes, 100)
-        val_scenes = random.sample(val_scenes, 50)
+        # # 手动减少数据量
+        # import random
+        # train_scenes = random.sample(train_scenes, 100)
+        # val_scenes = random.sample(val_scenes, 50)
     elif version == 'v1.0-test':
         train_scenes = splits.test
         val_scenes = []
@@ -610,7 +610,7 @@ def _fill_trainval_infos(nusc: NuScenes,
                 raise ValueError('x_end out of range')
 
             # 获取当前道路交通情况
-            traffic_condition, traffic_condition_one_hot, traffic_condition_all = get_traffic_condition(agent_lcf_feat, names)
+            # traffic_condition, traffic_condition_one_hot, traffic_condition_all = get_traffic_condition(agent_lcf_feat, names)
 
             # offset from lcf -> per-step offset
             ego_fut_trajs = ego_fut_trajs[1:] - ego_fut_trajs[:-1]

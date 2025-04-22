@@ -135,6 +135,9 @@ class GenADHead(DETRHead):
                  use_traj_lr_warmup=False,
                  motion_decoder=None,
                  motion_map_decoder=None,
+                 use_description=True,
+                 description_motion_ca=None,
+                 description_map_ca=None,
                  use_pe=False,
                  motion_det_score=None,
                  map_thresh=0.5,
@@ -164,6 +167,9 @@ class GenADHead(DETRHead):
         self.use_traj_lr_warmup = use_traj_lr_warmup
         self.motion_decoder = motion_decoder
         self.motion_map_decoder = motion_map_decoder
+        self.use_description = use_description
+        self.description_motion_ca = description_motion_ca
+        self.description_map_ca = description_map_ca
         self.use_pe = use_pe
         self.motion_det_score = motion_det_score
         self.map_thresh = map_thresh
@@ -255,60 +261,9 @@ class GenADHead(DETRHead):
         self.code_weights = nn.Parameter(torch.tensor(self.code_weights, requires_grad=False), requires_grad=False)
         self.map_code_weights = nn.Parameter(torch.tensor(self.map_code_weights, requires_grad=False), requires_grad=False)
 
-        # cross-attention，vlm提取的特征和motion_query之间
-        # self.vlm_motion_sa = nn.TransformerDecoder(
-        #     nn.TransformerDecoderLayer(
-        #         d_model=self.embed_dims,
-        #         nhead=4
-        #     ),
-        #     num_layers=2
-        # )
-        self.description_motion_ca = build_transformer_layer_sequence(dict(
-            type='CustomTransformerDecoder',
-            num_layers=1,
-            return_intermediate=False,
-            transformerlayers=dict(
-                type='BaseTransformerLayer',
-                attn_cfgs=[
-                    dict(
-                        type='MultiheadAttention',
-                        embed_dims=self.embed_dims,
-                        num_heads=8,
-                        dropout=0.1
-                    ),
-                ],
-                feedforward_channels=self.embed_dims * 2,
-                ffn_dropout=0.1,
-                operation_order=('cross_attn', 'norm', 'ffn', 'norm')
-            )
-        ))
-        # self.vlm_map_sa = nn.TransformerDecoder(
-        #     nn.TransformerDecoderLayer(
-        #         d_model=self.embed_dims,
-        #         nhead=4,
-        #         batch_first=True
-        #     ),
-        #     num_layers=2
-        # )
-        self.description_map_ca = build_transformer_layer_sequence(dict(
-            type='CustomTransformerDecoder',
-            num_layers=1,
-            return_intermediate=False,
-            transformerlayers=dict(
-                type='BaseTransformerLayer',
-                attn_cfgs=[
-                    dict(
-                        type='MultiheadAttention',
-                        embed_dims=self.embed_dims,
-                        num_heads=8,
-                        dropout=0.1
-                    ),
-                ],
-                feedforward_channels=self.embed_dims * 2,
-                ffn_dropout=0.1,
-                operation_order=('cross_attn', 'norm', 'ffn', 'norm')
-            )
-        ))
+        if self.use_description:
+            self.description_motion_ca = build_transformer_layer_sequence(self.description_motion_ca)
+            self.description_map_ca = build_transformer_layer_sequence(self.description_map_ca)
 
         # cmd部分
         self.cmd_query = nn.Embedding(self.ego_fut_mode, self.embed_dims)
@@ -723,7 +678,8 @@ class GenADHead(DETRHead):
         # 重点关注对象
 
         # 将从vlm中提取特征降低维度，进行对齐
-        description_feat = description_feat.permute(1, 0, 2)  # [n, B, 256]
+        if self.use_description:
+            description_feat = description_feat.permute(1, 0, 2)  # [n, B, 256]
 
         # motion query
         if self.motion_decoder is not None:
@@ -769,14 +725,17 @@ class GenADHead(DETRHead):
             motion_query = torch.cat([motion_query, ego_query], dim=0)  # [1801, 1, 256]
             motion_pos = torch.cat([motion_pos, ego_pos_emb], dim=0)  # [1801, 1, 256]
 
-            # 将motion_query和vlm提取的特征进行特征融合
-            motion_query_fuse = self.description_motion_ca(
-                query=motion_query,
-                key=description_feat,
-                value=description_feat,
-                query_pos=motion_pos,  # [1801, 1, 256]
-                key_padding_mask=invalid_motion_idx
-            )
+            if self.use_description:
+                # 将motion_query和vlm提取的特征进行特征融合
+                motion_query_fuse = self.description_motion_ca(
+                    query=motion_query,
+                    key=description_feat,
+                    value=description_feat,
+                    query_pos=motion_pos,  # [1801, 1, 256]
+                    key_padding_mask=invalid_motion_idx
+                )
+            else:
+                motion_query_fuse = motion_query
 
             # 此处的decoder就是TransformerDecoder
             # 公式5
@@ -822,13 +781,16 @@ class GenADHead(DETRHead):
                 else:
                     motion_pos, map_pos = None, None
 
-                # 将map_query和vlm提取的特征进行特征融合
-                map_query_fuse = self.description_map_ca(
-                    query=map_query.permute(1, 0, 2),
-                    key=description_feat.repeat(1, map_query.shape[0], 1),
-                    value=description_feat.repeat(1, map_query.shape[0], 1),
-                    query_pos=motion_pos.permute(1, 0, 2),
-                ).permute(1, 0, 2)
+                if self.use_description:
+                    # 将map_query和vlm提取的特征进行特征融合
+                    map_query_fuse = self.description_map_ca(
+                        query=map_query.permute(1, 0, 2),
+                        key=description_feat.repeat(1, map_query.shape[0], 1),
+                        value=description_feat.repeat(1, map_query.shape[0], 1),
+                        query_pos=motion_pos.permute(1, 0, 2),
+                    ).permute(1, 0, 2)
+                else:
+                    map_query_fuse = map_query
 
                 # 此处的decoder就是TransformerDecoder
                 # 公式6

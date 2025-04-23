@@ -268,6 +268,7 @@ class GenAD(MVXTwoStageDetector):
                 des_feat = self.description_head(des, prev_bev.device).to(prev_bev.dtype)
                 description_feat.append(des_feat)
             description_feat = torch.cat(description_feat, dim=0)
+            description_feat = description_feat.permute(1, 0, 2)  # [n, B, 256]
         else:
             description_feat = None
 
@@ -378,6 +379,7 @@ class GenAD(MVXTwoStageDetector):
                 des_feat = self.description_head(des, img.device).to(img.dtype)
                 description_feat.append(des_feat)
             description_feat = torch.cat(description_feat, dim=0)
+            description_feat = description_feat.permute(1, 0, 2)  # [n, B, 256]
         else:
             description_feat = None
 

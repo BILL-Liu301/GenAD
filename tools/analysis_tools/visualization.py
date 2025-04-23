@@ -754,7 +754,7 @@ def render_sample_data(
 def parse_args():
     parser = argparse.ArgumentParser(description='Visualize VAD predictions')
     parser.add_argument('--result_path', help='inference result file path')
-    parser.add_argument('--result_input_path', help='input of inference result file path')
+    parser.add_argument('--result_input_path', default=None, help='input of inference result file path')
     parser.add_argument('--save_path', help='the dir to save visualization results')
     args = parser.parse_args()
 
@@ -959,6 +959,5 @@ if __name__ == '__main__':
         sample_token_list, 
         results_origin, 
         out_path, 
-        'results_with_description.mp4'
-        # 'results_without_description.mp4'
+        'results.mp4'
     )

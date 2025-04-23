@@ -162,7 +162,7 @@ cython_debug/
 #.idea/
 
 ckpts/*
-visualization/testresults/*
+visualization/*
 .vscode/*
 outputs/*
 test/*

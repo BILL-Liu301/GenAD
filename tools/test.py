@@ -265,10 +265,8 @@ def main():
                 mmcv.dump(outputs['bbox_results'], args.out)
         kwargs = {} if args.eval_options is None else args.eval_options
         kwargs['jsonfile_prefix'] = osp.join(
-            # 'test', args.config.split('/')[-1].split('.')[-2], time.ctime().replace(' ', '_').replace(':', '_')
-            'test', args.config.split('/')[-1].split('.')[-2], 
-            'results_with_description'
-            # 'results_without_description'
+            'test', 
+            'with_description' if cfg['use_description'] else 'without_description'
         )
         if args.format_only:
             assert False
@@ -285,13 +283,12 @@ def main():
             eval_kwargs.update(dict(metric=args.eval, **kwargs))
 
             # 打印了一对东西，反正我没看懂
-            # 所以我在此处抑制
-            import contextlib
-            import io
-            f = io.StringIO()
-            print('Dealing with Result ...')
-            with contextlib.redirect_stdout(f):
-                results_dict = dataset.evaluate(outputs['bbox_results'], 'results_nusc', **eval_kwargs)
+            # # 所以我在此处抑制
+            # import contextlib
+            # import io
+            # f = io.StringIO()
+            # with contextlib.redirect_stdout(f):
+            results_dict = dataset.evaluate(outputs['bbox_results'], 'results_nusc', **eval_kwargs)
             # print('Dealing with Result Change CMD ...')
             # with contextlib.redirect_stdout(f):
             #     results_dict_change_cmd = dataset.evaluate(outputs['bbox_results_change_cmd'], 'results_nusc_change_cmd', **eval_kwargs)

@@ -135,9 +135,13 @@ class GenADHead(DETRHead):
                  use_traj_lr_warmup=False,
                  motion_decoder=None,
                  motion_map_decoder=None,
-                 use_description=True,
-                 description_motion_ca=None,
+                 use_description=False,
+                 description_with_bev=False,
+                 description_with_map=False,
+                 description_with_motion=False,
+                 description_bev_ca=None,
                  description_map_ca=None,
+                 description_motion_ca=None,
                  use_pe=False,
                  motion_det_score=None,
                  map_thresh=0.5,
@@ -168,8 +172,12 @@ class GenADHead(DETRHead):
         self.motion_decoder = motion_decoder
         self.motion_map_decoder = motion_map_decoder
         self.use_description = use_description
-        self.description_motion_ca = description_motion_ca
+        self.description_with_bev = description_with_bev
+        self.description_with_map = description_with_map
+        self.description_with_motion = description_with_motion
+        self.description_bev_ca = description_bev_ca
         self.description_map_ca = description_map_ca
+        self.description_motion_ca = description_motion_ca
         self.use_pe = use_pe
         self.motion_det_score = motion_det_score
         self.map_thresh = map_thresh
@@ -262,8 +270,13 @@ class GenADHead(DETRHead):
         self.map_code_weights = nn.Parameter(torch.tensor(self.map_code_weights, requires_grad=False), requires_grad=False)
 
         if self.use_description:
-            self.description_motion_ca = build_transformer_layer_sequence(self.description_motion_ca)
-            self.description_map_ca = build_transformer_layer_sequence(self.description_map_ca)
+            if self.description_with_bev:
+                self.bev_query_pos = nn.Embedding(self.bev_h * self.bev_w, self.embed_dims)
+                self.description_bev_ca = build_transformer_layer_sequence(self.description_bev_ca)
+            if self.description_with_map:
+                self.description_map_ca = build_transformer_layer_sequence(self.description_map_ca)
+            if self.description_with_motion:
+                self.description_motion_ca = build_transformer_layer_sequence(self.description_motion_ca)
 
         # cmd部分
         self.cmd_query = nn.Embedding(self.ego_fut_mode, self.embed_dims)
@@ -588,9 +601,20 @@ class GenADHead(DETRHead):
                 prev_bev=prev_bev,
             )
         else:
+            if self.use_description and self.description_with_bev:
+                bev_query_pos = self.bev_query_pos.weight.unsqueeze(1).to(dtype)  # [10000, 1, 256]
+                # 将prev_bev和vlm提取的特征进行特征融合
+                bev_queries_fuse = self.description_bev_ca(
+                    query=bev_queries.unsqueeze(1),
+                    key=description_feat,
+                    value=description_feat,
+                    query_pos=bev_query_pos
+                ).squeeze(1)
+            else:
+                bev_queries_fuse = bev_queries
             outputs = self.transformer(
                 mlvl_feats,
-                bev_queries,
+                bev_queries_fuse,
                 object_query_embeds,
                 map_query_embeds,
                 self.bev_h,
@@ -677,10 +701,6 @@ class GenADHead(DETRHead):
         # motion prediction
         # 重点关注对象
 
-        # 将从vlm中提取特征降低维度，进行对齐
-        if self.use_description:
-            description_feat = description_feat.permute(1, 0, 2)  # [n, B, 256]
-
         # motion query
         if self.motion_decoder is not None:
             batch_size, num_agent = outputs_coords_bev[-1].shape[:2]  # [1, 300, 2]，历史数据对应的最后一帧的bev特征坐标系
@@ -725,14 +745,13 @@ class GenADHead(DETRHead):
             motion_query = torch.cat([motion_query, ego_query], dim=0)  # [1801, 1, 256]
             motion_pos = torch.cat([motion_pos, ego_pos_emb], dim=0)  # [1801, 1, 256]
 
-            if self.use_description:
+            if self.use_description and self.description_with_motion:
                 # 将motion_query和vlm提取的特征进行特征融合
                 motion_query_fuse = self.description_motion_ca(
                     query=motion_query,
                     key=description_feat,
                     value=description_feat,
                     query_pos=motion_pos,  # [1801, 1, 256]
-                    key_padding_mask=invalid_motion_idx
                 )
             else:
                 motion_query_fuse = motion_query
@@ -781,7 +800,7 @@ class GenADHead(DETRHead):
                 else:
                     motion_pos, map_pos = None, None
 
-                if self.use_description:
+                if self.use_description and self.description_with_map:
                     # 将map_query和vlm提取的特征进行特征融合
                     map_query_fuse = self.description_map_ca(
                         query=map_query.permute(1, 0, 2),

@@ -42,11 +42,11 @@ _num_levels_ = 1
 bev_h_ = 100
 bev_w_ = 100
 queue_length = 3 # each sequence contains `queue_length` frames.
-total_epochs = 200
-use_description = True
-description_ca_bev = True
-description_ca_map = True
-description_ca_motion = True
+total_epochs = 100
+use_description = False
+description_ca_bev = False
+description_ca_map = False
+description_ca_motion = False
 
 model = dict(
     type='GenAD',

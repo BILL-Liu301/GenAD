@@ -152,7 +152,14 @@ def main():
     if args.work_dir is not None:
         # update configs according to CLI args if args.work_dir is not None
         if cfg.use_description:
-            work_dir = osp.join(args.work_dir, 'with_description')
+            folder_name = 'with_description_ca'
+            if cfg.description_ca_bev:
+                folder_name += '_bev'
+            if cfg.description_ca_map:
+                folder_name += '_map'
+            if cfg.description_ca_motion:
+                folder_name += '_motion'
+            work_dir = osp.join(args.work_dir, folder_name)
         else:
             work_dir = osp.join(args.work_dir, 'without_description')
         cfg.work_dir = work_dir

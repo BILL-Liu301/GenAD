@@ -505,7 +505,7 @@ evaluation = dict(interval=total_epochs, pipeline=test_pipeline, metric='bbox', 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
 
 log_config = dict(
-    interval=100,
+    interval=50,
     hooks=[
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')

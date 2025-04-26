@@ -603,15 +603,6 @@ class GenADHead(DETRHead):
                 prev_bev=prev_bev,
             )
         else:
-            if self.use_description and self.description_ca_bev:
-                bev_query_pos = self.bev_query_pos.weight.unsqueeze(1).to(dtype)  # [10000, 1, 256]
-                # 将prev_bev和vlm提取的特征进行特征融合
-                bev_queries = self.description_bev_ca(
-                    query=bev_queries.unsqueeze(1),
-                    key=description_feat,
-                    value=description_feat,
-                    query_pos=bev_query_pos
-                ).squeeze(1)
             outputs = self.transformer(
                 mlvl_feats,
                 bev_queries,
@@ -627,7 +618,10 @@ class GenADHead(DETRHead):
                 map_reg_branches=self.map_reg_branches if self.with_box_refine else None,  # noqa:E501
                 map_cls_branches=self.map_cls_branches if self.as_two_stage else None,
                 img_metas=img_metas,
-                prev_bev=prev_bev
+                prev_bev=prev_bev,
+                description_feat=description_feat,
+                bev_query_pos=self.bev_query_pos.weight,
+                description_bev_ca=self.description_bev_ca if self.use_description and self.description_ca_bev else None
             )
 
         # bev_embed: bev features
@@ -641,7 +635,6 @@ class GenADHead(DETRHead):
         bev_embed, hs, init_reference, inter_references, map_hs, map_init_reference, map_inter_references = outputs
 
         if self.use_description and self.description_ca_map:
-            # TODO: 这里我还没改完
             # 将map_hs和vlm提取的特征进行特征融合
             map_hs = map_hs.permute(1, 0, 2, 3).flatten(1, 2)  # [3, 2000, 1, 256] -> [2000, 3, 1, 256] -> [2000, 3, 256]
             map_query_pos = self.map_query_pos.weight.unsqueeze(1).repeat(1, map_hs.shape[1], 1).to(dtype)  # [2000, 256] -> [2000, 3, 256]

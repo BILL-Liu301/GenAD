@@ -28,6 +28,26 @@
 
 ## Plan
 
+### 不确定的指标
+
+GenAD的代码中输出了很多我不确定什么意思的指标
+
+* [X] plan_L2_xs
+* [ ] plan_obj_col_xs
+* [X] plan_obj_box_col_xs
+* [ ] plan_L2_stp3_xs
+* [ ] plan_obj_col_stp3_xs
+* [ ] plan_obj_box_col_stp3_xs
+
+```
+metric_dict['plan_L2_{}s'.format(i+1)] =traj_L2
+metric_dict['plan_L2_stp3_{}s'.format(i+1)] =traj_L2_stp3
+metric_dict['plan_obj_col_{}s'.format(i+1)] =obj_coll.mean().item()
+metric_dict['plan_obj_col_stp3_{}s'.format(i+1)] =obj_coll[-1].item()
+metric_dict['plan_obj_box_col_{}s'.format(i+1)] =obj_box_coll.mean().item()
+metric_dict['plan_obj_box_col_stp3_{}s'.format(i+1)] =obj_box_coll[-1].item()
+```
+
 ### L2(👇)
 
 |                                         |       1s(👇)       |       2s(👇)       |      3s(👇)      |

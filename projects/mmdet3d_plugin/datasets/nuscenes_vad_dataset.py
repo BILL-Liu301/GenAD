@@ -1824,7 +1824,7 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
         
         for k in metric_dict:
             metric_dict[k] = metric_dict[k] / num_valid
-            print("{}:{}".format(k, metric_dict[k]))
+            print("{}: {}".format(k, metric_dict[k]))
 
         result_files, tmp_dir = self.format_results(results, file_name, jsonfile_prefix)
 

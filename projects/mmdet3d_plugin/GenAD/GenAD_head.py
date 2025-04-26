@@ -274,15 +274,16 @@ class GenADHead(DETRHead):
                 self.bev_query_pos = nn.Embedding(self.bev_h * self.bev_w, self.embed_dims)
                 self.description_bev_ca = build_transformer_layer_sequence(self.description_bev_ca)
             if self.description_ca_map:
+                self.map_query_pos = nn.Embedding(self.map_num_query, self.embed_dims)
                 self.description_map_ca = build_transformer_layer_sequence(self.description_map_ca)
             if self.description_ca_motion:
                 self.description_motion_ca = build_transformer_layer_sequence(self.description_motion_ca)
 
         # cmd部分
-        self.cmd_query = nn.Embedding(self.ego_fut_mode, self.embed_dims)
-        self.cmd_pos = nn.Embedding(self.ego_fut_mode, self.embed_dims)
-        self.cmd_query_mlp = nn.Linear(self.embed_dims * 2, self.embed_dims)
-        self.cmd_pos_mlp = nn.Linear(self.embed_dims * 2, self.embed_dims)
+        # self.cmd_query = nn.Embedding(self.ego_fut_mode, self.embed_dims)
+        # self.cmd_pos = nn.Embedding(self.ego_fut_mode, self.embed_dims)
+        # self.cmd_query_mlp = nn.Linear(self.embed_dims * 2, self.embed_dims)
+        # self.cmd_pos_mlp = nn.Linear(self.embed_dims * 2, self.embed_dims)
 
         if kwargs['train_cfg'] is not None:
             assert 'map_assigner' in kwargs['train_cfg'], 'map assigner should be provided ' \
@@ -573,6 +574,7 @@ class GenADHead(DETRHead):
 
         bs, num_cam, _, _, _ = mlvl_feats[0].shape
         dtype = mlvl_feats[0].dtype
+        assert bs==1, 'only support bs=1'
 
         # 从query_embedding、map_pts_embedding和map_instance_embedding中提取各自的weight，作为embed和query
         # 不理解，按理说上述三个都是nn.Embedding类型的对象，直接用就好了，为什么要特意提取各自的weight？
@@ -604,17 +606,15 @@ class GenADHead(DETRHead):
             if self.use_description and self.description_ca_bev:
                 bev_query_pos = self.bev_query_pos.weight.unsqueeze(1).to(dtype)  # [10000, 1, 256]
                 # 将prev_bev和vlm提取的特征进行特征融合
-                bev_queries_fuse = self.description_bev_ca(
+                bev_queries = self.description_bev_ca(
                     query=bev_queries.unsqueeze(1),
                     key=description_feat,
                     value=description_feat,
                     query_pos=bev_query_pos
                 ).squeeze(1)
-            else:
-                bev_queries_fuse = bev_queries
             outputs = self.transformer(
                 mlvl_feats,
-                bev_queries_fuse,
+                bev_queries,
                 object_query_embeds,
                 map_query_embeds,
                 self.bev_h,
@@ -639,6 +639,19 @@ class GenADHead(DETRHead):
         # map_inter_references: reference points processing
 
         bev_embed, hs, init_reference, inter_references, map_hs, map_init_reference, map_inter_references = outputs
+
+        if self.use_description and self.description_ca_map:
+            # TODO: 这里我还没改完
+            # 将map_hs和vlm提取的特征进行特征融合
+            map_hs = map_hs.permute(1, 0, 2, 3).flatten(1, 2)  # [3, 2000, 1, 256] -> [2000, 3, 1, 256] -> [2000, 3, 256]
+            map_query_pos = self.map_query_pos.weight.unsqueeze(1).repeat(1, map_hs.shape[1], 1).to(dtype)  # [2000, 256] -> [2000, 3, 256]
+            map_hs = self.description_map_ca(  # [2000, 3, 256]
+                query=map_hs,
+                key=description_feat.repeat(1, map_hs.shape[1], 1),
+                value=description_feat.repeat(1, map_hs.shape[1], 1),
+                query_pos=map_query_pos,
+            )
+            map_hs = map_hs.permute(1, 0, 2).unsqueeze(2)  # [2000, 3, 256] -> [3, 2000, 256] -> [3, 2000, 1, 256]
 
         hs = hs.permute(0, 2, 1, 3)  # [3, 300, 1, 256] -> [3, 1, 300, 256]
         outputs_classes = []
@@ -747,21 +760,19 @@ class GenADHead(DETRHead):
 
             if self.use_description and self.description_ca_motion:
                 # 将motion_query和vlm提取的特征进行特征融合
-                motion_query_fuse = self.description_motion_ca(
+                motion_query = self.description_motion_ca(
                     query=motion_query,
                     key=description_feat,
                     value=description_feat,
                     query_pos=motion_pos,  # [1801, 1, 256]
                 )
-            else:
-                motion_query_fuse = motion_query
 
             # 此处的decoder就是TransformerDecoder
             # 公式5
             motion_hs = self.motion_decoder(  # [1801, 1, 256]
-                query=motion_query_fuse,  # [1801, 1, 256]
-                key=motion_query_fuse,  # [1801, 1, 256]
-                value=motion_query_fuse,  # [1801, 1, 256]
+                query=motion_query,  # [1801, 1, 256]
+                key=motion_query,  # [1801, 1, 256]
+                value=motion_query,  # [1801, 1, 256]
                 query_pos=motion_pos,  # [1801, 1, 256]
                 key_pos=motion_pos,  # [1801, 1, 256]
                 key_padding_mask=invalid_motion_idx
@@ -800,23 +811,12 @@ class GenADHead(DETRHead):
                 else:
                     motion_pos, map_pos = None, None
 
-                if self.use_description and self.description_ca_map:
-                    # 将map_query和vlm提取的特征进行特征融合
-                    map_query_fuse = self.description_map_ca(
-                        query=map_query.permute(1, 0, 2),
-                        key=description_feat.repeat(1, map_query.shape[0], 1),
-                        value=description_feat.repeat(1, map_query.shape[0], 1),
-                        query_pos=motion_pos.permute(1, 0, 2),
-                    ).permute(1, 0, 2)
-                else:
-                    map_query_fuse = map_query
-
                 # 此处的decoder就是TransformerDecoder
                 # 公式6
                 ca_motion_query = self.motion_map_decoder(  # [1, 1801, 256]
                     query=sa_motion_query,  # [1, 1801, 256]
-                    key=map_query_fuse,  # [1, 1801, 256]
-                    value=map_query_fuse,  # [1, 1801, 256]
+                    key=map_query,  # [1, 1801, 256]
+                    value=map_query,  # [1, 1801, 256]
                     query_pos=motion_pos,  # [1, 1801, 256]
                     key_pos=map_pos,  # [1, 1801, 256]
                     key_padding_mask=key_padding_mask)  # [1801, 1]

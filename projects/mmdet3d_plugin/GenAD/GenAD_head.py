@@ -620,7 +620,7 @@ class GenADHead(DETRHead):
                 img_metas=img_metas,
                 prev_bev=prev_bev,
                 description_feat=description_feat,
-                bev_query_pos=self.bev_query_pos.weight,
+                bev_query_pos=self.bev_query_pos.weight if self.use_description and self.description_ca_bev else None,
                 description_bev_ca=self.description_bev_ca if self.use_description and self.description_ca_bev else None
             )
 

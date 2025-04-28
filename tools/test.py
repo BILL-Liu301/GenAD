@@ -236,10 +236,7 @@ def main():
     if not distributed:
         # assert False
         model = MMDataParallel(model, device_ids=[0])
-        print('Testing For Origin Dataset ...')
         outputs = single_gpu_test(model, data_loader, args.show, args.show_dir)
-        # print('Testing With Change Cmd ...')
-        # outputs_change_cmd = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=True)
     else:
         assert False
         model = MMDistributedDataParallel(
@@ -251,7 +248,6 @@ def main():
 
     tmp = {}
     tmp['bbox_results'] = outputs
-    # tmp['bbox_results_change_cmd'] = outputs_change_cmd
     outputs = tmp
     rank, _ = get_dist_info()
     assert rank == 0

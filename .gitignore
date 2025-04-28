@@ -163,6 +163,7 @@ cython_debug/
 
 ckpts/*
 visualization/*
+visualization_concated/*
 .vscode/*
 outputs/*
 test/*

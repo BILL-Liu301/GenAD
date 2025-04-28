@@ -1609,16 +1609,19 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
         else:
             # should take the inner dict out of 'pts_bbox' or 'img_bbox' dict
             result_files = dict()
-            result_input = {}
+            result_input = dict()
             for name in results[0]:
                 if name == 'pts_bbox':
                     print(f'\nFormating bboxes of {name}')
-                    results_ = [out[name] for out in results]
+                    results_ = [res[name] for res in results]
                     tmp_file_ = osp.join(jsonfile_prefix, name)
                     # 在此处规整
                     result_files.update({name: self._format_bbox(results_, file_name, jsonfile_prefix=tmp_file_)})
                 elif name == 'input':
-                    result_input.update({name: [out[name] for out in results]})
+                    inputs_ = [res[name] for res in results]
+                    for sample_id, input in enumerate(inputs_):
+                        sample_token = self.data_infos[sample_id]['token']
+                        result_input[sample_token] = input
                 else:
                     pass
             

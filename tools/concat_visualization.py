@@ -2,6 +2,7 @@ import argparse
 import os
 import cv2
 import json
+import shutil
 from tqdm import tqdm
 
 def parse_args():
@@ -39,14 +40,26 @@ if __name__ == '__main__':
         img_concat = cv2.vconcat(img_list)
         cv2.imwrite(os.path.join(args.save_path, sample_token + '.png'), img_concat)
 
+        # 复制其他文件
         os.makedirs(os.path.join(args.save_path, sample_token))
-        cams_path = os.path.join(args.visualization_path, modes[0], 'samples', f'CAMS_{sample_token}.png')
-        cams = cv2.imread(cams_path)
-        cv2.imwrite(os.path.join(args.save_path, sample_token, f'cams.png'), cams)
-        description = json.load(open(os.path.join(args.visualization_path, modes[0], 'samples', f'des_{sample_token}.json')))
-        json.dump(description, open(os.path.join(args.save_path, sample_token, f'description.json'), 'w'), indent=4)
+        shutil.copy(
+            os.path.join(args.visualization_path, modes[0], 'samples', f'CAMS_{sample_token}.png'),
+            os.path.join(args.save_path, sample_token, f'cams.png')
+        )
+        shutil.copy(
+            os.path.join(args.visualization_path, modes[0], 'samples', f'des_{sample_token}.json'),
+            os.path.join(args.save_path, sample_token, f'description.json')
+        )
         for mode in modes:
-            bev_pred_path = os.path.join(args.visualization_path, mode, 'samples', f'bev_pred_{sample_token}.png')
-            bev_pred = cv2.imread(bev_pred_path)
-            cv2.imwrite(os.path.join(args.save_path, sample_token, f'{mode}.png'), bev_pred)
-
+            shutil.copy(
+                os.path.join(args.visualization_path, mode, 'samples', f'bev_pred_{sample_token}.png'),
+                os.path.join(args.save_path, sample_token, f'{mode}.png')
+            )
+            shutil.copy(
+                os.path.join(args.visualization_path, mode, 'samples', f'bev_pred_map_{sample_token}.png'),
+                os.path.join(args.save_path, sample_token, f'{mode}_plot_bev_pred_map.png')
+            )
+            shutil.copy(
+                os.path.join(args.visualization_path, mode, 'samples', f'bev_pred_agents_{sample_token}.png'),
+                os.path.join(args.save_path, sample_token, f'{mode}_plot_bev_pred_agents_.png')
+            )

@@ -541,9 +541,38 @@ def visualize_sample(nusc: NuScenes,
     plt.ylim(ymin=-30, ymax=30)
 
     # Show Pred Map
-
     result_dic = pred_data['map_results'][sample_token]['vectors']
+    draw_map(fig, result_dic, axes, colors_plt)
 
+    # Show Agents
+    draw_agents(fig, boxes_est, axes, conf_th, traj_use_perstep_offset)
+
+    # Show Planning
+    drwa_plnning(fig, pred_data, sample_token, axes)
+
+    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_{sample_token}.png'), bbox_inches='tight', dpi=200)
+    title = savepath.split('/')[-1]
+    plt.title(title)
+    plt.savefig(savepath+'/bev_pred.png', bbox_inches='tight', dpi=200)
+    plt.close()
+
+    fig_, axes = plt.subplots(1, 1, figsize=(4, 4))
+    plt.xlim(xmin=-30, xmax=30)
+    plt.ylim(ymin=-30, ymax=30)
+    result_dic = pred_data['map_results'][sample_token]['vectors']
+    draw_map(fig, result_dic, axes, colors_plt)
+    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_map_{sample_token}.png'), bbox_inches='tight', dpi=200)
+    plt.close()
+
+    fig_, axes = plt.subplots(1, 1, figsize=(4, 4))
+    plt.xlim(xmin=-30, xmax=30)
+    plt.ylim(ymin=-30, ymax=30)
+    draw_agents(fig, boxes_est, axes, conf_th, traj_use_perstep_offset)
+    drwa_plnning(fig, pred_data, sample_token, axes)
+    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_agents_{sample_token}.png'), bbox_inches='tight', dpi=200)
+    plt.close()
+
+def draw_map(fig, result_dic, axes, colors_plt):
     for vector in result_dic:
         if vector['confidence_level'] < 0.6:
             continue
@@ -554,8 +583,13 @@ def visualize_sample(nusc: NuScenes,
 
         axes.plot(pts_x, pts_y, color=colors_plt[pred_label_3d],linewidth=2,alpha=0.8,zorder=-1)
         axes.scatter(pts_x, pts_y, color=colors_plt[pred_label_3d],s=1,alpha=0.8,zorder=-1)
+    axes.axes.xaxis.set_ticks([])
+    axes.axes.yaxis.set_ticks([])
+    axes.axis('off')
+    fig.set_tight_layout(True)
+    fig.canvas.draw()
 
-
+def draw_agents(fig, boxes_est, axes, conf_th, traj_use_perstep_offset):
     # ignore_list = ['barrier', 'motorcycle', 'bicycle', 'traffic_cone']
     ignore_list = ['barrier', 'bicycle', 'traffic_cone']
 
@@ -596,6 +630,13 @@ def visualize_sample(nusc: NuScenes,
         else:
             box.render_fut_trajs_coords(axes, color='tomato', linewidth=1)
 
+    axes.axes.xaxis.set_ticks([])
+    axes.axes.yaxis.set_ticks([])
+    axes.axis('off')
+    fig.set_tight_layout(True)
+    fig.canvas.draw()
+
+def drwa_plnning(fig, pred_data, sample_token, axes):
     # Show Planning.
     axes.plot([-0.9, -0.9], [-2, 2], color='mediumseagreen', linewidth=3, alpha=0.8)
     axes.plot([-0.9, 0.9], [2, 2], color='mediumseagreen', linewidth=3, alpha=0.8)
@@ -627,18 +668,11 @@ def visualize_sample(nusc: NuScenes,
     line_segments = LineCollection(plan_vecs, colors=colors, linewidths=6, linestyles='solid', cmap=cmap)
     axes.add_collection(line_segments)
 
-
     axes.axes.xaxis.set_ticks([])
     axes.axes.yaxis.set_ticks([])
     axes.axis('off')
     fig.set_tight_layout(True)
     fig.canvas.draw()
-    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_{sample_token}.png'), bbox_inches='tight', dpi=200)
-    title = savepath.split('/')[-1]
-    plt.title(title)
-    plt.savefig(savepath+'/bev_pred.png', bbox_inches='tight', dpi=200)
-    plt.close()
-
 
 def obtain_sensor2top(nusc,
                       sensor_token,

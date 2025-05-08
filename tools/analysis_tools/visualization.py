@@ -535,10 +535,13 @@ def visualize_sample(nusc: NuScenes,
     for box_est, box_est_global in zip(boxes_est, boxes_est_global):
         box_est.score = box_est_global.detection_score
 
+    xlim = [-30, 30]
+    ylim = [-30, 30]
+
     # Init axes.
     fig, axes = plt.subplots(1, 1, figsize=(4, 4))
-    plt.xlim(xmin=-30, xmax=30)
-    plt.ylim(ymin=-30, ymax=30)
+    plt.xlim(*xlim)
+    plt.ylim(*ylim)
 
     # Show Pred Map
     result_dic = pred_data['map_results'][sample_token]['vectors']
@@ -557,16 +560,16 @@ def visualize_sample(nusc: NuScenes,
     plt.close()
 
     fig_, axes = plt.subplots(1, 1, figsize=(4, 4))
-    plt.xlim(xmin=-30, xmax=30)
-    plt.ylim(ymin=-30, ymax=30)
+    plt.xlim(*xlim)
+    plt.ylim(*ylim)
     result_dic = pred_data['map_results'][sample_token]['vectors']
     draw_map(fig, result_dic, axes, colors_plt)
     plt.savefig(osp.join(savepath, 'samples', f'bev_pred_map_{sample_token}.png'), bbox_inches='tight', dpi=200)
     plt.close()
 
     fig_, axes = plt.subplots(1, 1, figsize=(4, 4))
-    plt.xlim(xmin=-30, xmax=30)
-    plt.ylim(ymin=-30, ymax=30)
+    plt.xlim(*xlim)
+    plt.ylim(*ylim)
     draw_agents(fig, boxes_est, axes, conf_th, traj_use_perstep_offset)
     drwa_plnning(fig, pred_data, sample_token, axes)
     plt.savefig(osp.join(savepath, 'samples', f'bev_pred_agents_{sample_token}.png'), bbox_inches='tight', dpi=200)

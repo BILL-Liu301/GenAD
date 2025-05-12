@@ -262,7 +262,7 @@ def get_predicted_data(sample_data_token: str,
     return data_path, box_list, cam_intrinsic
 
 
-def lidiar_render(sample_token, data, out_path=None, out_name=None, traj_use_perstep_offset=True):
+def lidiar_render(sample_token, data, out_path=None, out_name=None, traj_use_perstep_offset=True, file_id=None):
     bbox_gt_list = []
     bbox_pred_list = []
     sample_rec = nusc.get('sample', sample_token)
@@ -318,7 +318,8 @@ def lidiar_render(sample_token, data, out_path=None, out_name=None, traj_use_per
     visualize_sample(
         nusc, sample_token, gt_annotations, pred_annotations,
         savepath=out_path, traj_use_perstep_offset=traj_use_perstep_offset, 
-        pred_data=data
+        pred_data=data,
+        file_id=file_id
     )
 
 
@@ -506,7 +507,9 @@ def visualize_sample(nusc: NuScenes,
                      map_fixed_ptsnum_per_line=20,
                      gt_format=['fixed_num_pts'],
                      colors_plt = ['red', 'green', 'blue'], #['cornflowerblue', 'royalblue', 'slategrey'],
-                     pred_data = None) -> None:
+                     pred_data = None,
+                     file_id=None
+                     ) -> None:
     """
     Visualizes a sample from BEV with annotations and detection results.
     :param nusc: NuScenes object.
@@ -553,7 +556,7 @@ def visualize_sample(nusc: NuScenes,
     # Show Planning
     drwa_plnning(fig, pred_data, sample_token, axes)
 
-    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_{sample_token}.png'), bbox_inches='tight', dpi=200)
+    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_{file_id}.png'), bbox_inches='tight', dpi=200)
     title = savepath.split('/')[-1]
     plt.title(title)
     plt.savefig(savepath+'/bev_pred.png', bbox_inches='tight', dpi=200)
@@ -564,7 +567,7 @@ def visualize_sample(nusc: NuScenes,
     plt.ylim(*ylim)
     result_dic = pred_data['map_results'][sample_token]['vectors']
     draw_map(fig, result_dic, axes, colors_plt)
-    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_map_{sample_token}.png'), bbox_inches='tight', dpi=200)
+    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_map_{file_id}.png'), bbox_inches='tight', dpi=200)
     plt.close()
 
     fig_, axes = plt.subplots(1, 1, figsize=(4, 4))
@@ -572,7 +575,7 @@ def visualize_sample(nusc: NuScenes,
     plt.ylim(*ylim)
     draw_agents(fig, boxes_est, axes, conf_th, traj_use_perstep_offset)
     drwa_plnning(fig, pred_data, sample_token, axes)
-    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_agents_{sample_token}.png'), bbox_inches='tight', dpi=200)
+    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_agents_{file_id}.png'), bbox_inches='tight', dpi=200)
     plt.close()
 
 def draw_map(fig, result_dic, axes, colors_plt):
@@ -757,7 +760,8 @@ def render_sample_data(
         verbose: bool = True,
         show_panoptic: bool = False,
         pred_data=None,
-        traj_use_perstep_offset: bool = True
+        traj_use_perstep_offset: bool = True,
+        file_id=None,
       ) -> None:
     """
     Render sample data onto axis.
@@ -787,7 +791,8 @@ def render_sample_data(
     """
     lidiar_render(
         sample_toekn, pred_data, out_path=out_path,
-        out_name=out_name, traj_use_perstep_offset=traj_use_perstep_offset
+        out_name=out_name, traj_use_perstep_offset=traj_use_perstep_offset,
+        file_id=file_id
     )
 
 
@@ -805,22 +810,26 @@ def run(sample_token_list, results_, results_input_, out_path, video_name):
     video_path = osp.join(out_path, video_name)
     video = cv2.VideoWriter(video_path, fourcc, 10, (2933, 800), True)
 
-    for sample_token in tqdm(sample_token_list):
+    for i, sample_token in tqdm(enumerate(sample_token_list), total=len(sample_token_list)):
         mmcv.mkdir_or_exist(out_path)
         mmcv.mkdir_or_exist(osp.join(out_path, 'samples'))
+        # file_id = sample_token
+        file_id = str(i)
 
         # 保存输入数据中的description
         description = {
+            'sample_token': sample_token,
             'question': results_input_[sample_token]['description_question'][0].data[0][0].item(),
             'answer': results_input_[sample_token]['description_answer'][0].data[0][0].item()
         }
-        mmcv.dump(description, osp.join(out_path, 'samples', f'des_{sample_token}.json'), indent=4)
+        mmcv.dump(description, osp.join(out_path, 'samples', f'des_{file_id}.json'), indent=4)
 
         # 此处就会绘制BEV图
         render_sample_data(
             sample_token,
             pred_data=results_,
-            out_path=out_path
+            out_path=out_path,
+            file_id=file_id
         )
         pred_path = osp.join(out_path, 'bev_pred.png')
         pred_img = cv2.imread(pred_path)
@@ -971,12 +980,12 @@ def run(sample_token_list, results_, results_input_, out_path, video_name):
         cam_img_top = cv2.hconcat([cam_imgs[0], cam_imgs[1], cam_imgs[2]])
         cam_img_down = cv2.hconcat([cam_imgs[3], cam_imgs[4], cam_imgs[5]])
         cam_img = cv2.vconcat([cam_img_top, cam_img_down])
-        cv2.imwrite(osp.join(out_path, 'samples', f'CAMS_{sample_token}.png'), cam_img)
+        cv2.imwrite(osp.join(out_path, 'samples', f'CAMS_{file_id}.png'), cam_img)
         size = (2133, 800)
         cam_img = cv2.resize(cam_img, size)
         vis_img = cv2.hconcat([cam_img, sample_img])
 
-        cv2.imwrite(osp.join(out_path, f'{sample_token}.png'), vis_img)
+        cv2.imwrite(osp.join(out_path, f'{file_id}.png'), vis_img)
         # video.write(vis_img)
 
     # # 等待视频生成完毕
@@ -1000,7 +1009,8 @@ if __name__ == '__main__':
 
     sample_token_list = list(results_origin['results'].keys())
 
-    nusc = NuScenes(version='v1.0-mini', dataroot='data/nuscenes', verbose=True)
+    # nusc = NuScenes(version='v1.0-mini', dataroot='data/nuscenes', verbose=True)
+    nusc = NuScenes(version='v1.0-trainval', dataroot='data/nuscenes', verbose=True)
 
     run(
         sample_token_list, 

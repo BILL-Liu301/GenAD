@@ -91,13 +91,19 @@ def create_nuscenes_infos(root_path,
     if version == 'v1.0-trainval':
         train_scenes = splits.train
         val_scenes = splits.val
-        # # 手动减少数据量
+        # 手动减少数据量
         # import random
-        # train_scenes = random.sample(train_scenes, 100)
-        # val_scenes = random.sample(val_scenes, 50)
+        # train_scenes = random.sample(train_scenes, 1)
+        # val_scenes = random.sample(val_scenes, 1)
+        # train_scenes = train_scenes[10:15]
+        # val_scenes = val_scenes[10:15]
     elif version == 'v1.0-test':
         train_scenes = splits.test
         val_scenes = []
+        # 手动减少数据量
+        # import random
+        # train_scenes = random.sample(train_scenes, 1)
+        # train_scenes = train_scenes[10:15]
     elif version == 'v1.0-mini':
         train_scenes = splits.mini_train
         val_scenes = splits.mini_val
@@ -327,6 +333,9 @@ def _fill_trainval_infos(nusc: NuScenes,
         cat2idx[dic['name']] = idx
 
     for sample in mmcv.track_iter_progress(nusc.sample):
+        if not sample['scene_token'] in [*train_scenes, *val_scenes]:
+            continue
+
         map_location = nusc.get('log', nusc.get('scene', sample['scene_token'])['log_token'])['location']
         lidar_token = sample['data']['LIDAR_TOP']
         sd_rec = nusc.get('sample_data', lidar_token)

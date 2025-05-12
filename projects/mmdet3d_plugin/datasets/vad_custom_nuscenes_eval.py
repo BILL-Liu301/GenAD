@@ -273,7 +273,7 @@ def load_prediction(result_path: str, max_boxes_per_sample: int, box_cls, verbos
 
     return all_results, meta
 
-def load_gt(nusc: NuScenes, eval_split: str, box_cls, verbose: bool = False):
+def load_gt(nusc: NuScenes, eval_split: str, box_cls, verbose: bool = False, pred_boxes_sample_tokens=None):
     """
     Loads ground truth boxes from DB.
     :param nusc: A NuScenes instance.
@@ -291,6 +291,10 @@ def load_gt(nusc: NuScenes, eval_split: str, box_cls, verbose: bool = False):
         print('Loading annotations for {} split from nuScenes version: {}'.format(eval_split, nusc.version))
     # Read out all sample_tokens in DB.
     sample_tokens_all = [s['token'] for s in nusc.sample]
+    if pred_boxes_sample_tokens is not None:
+        for t in pred_boxes_sample_tokens:
+            assert t in sample_tokens_all, "Samples in split doesn't match samples in predictions."
+        sample_tokens_all = pred_boxes_sample_tokens
     assert len(sample_tokens_all) > 0, "Error: Database has no samples!"
 
     # Only keep samples from this split.
@@ -665,7 +669,7 @@ class NuScenesEval_custom(NuScenesEval):
         if verbose:
             print('Initializing nuScenes detection evaluation')
         self.pred_boxes, self.meta = load_prediction(self.result_path, self.cfg.max_boxes_per_sample, DetectionBox,verbose=verbose)
-        self.gt_boxes = load_gt(self.nusc, self.eval_set, DetectionBox_modified, verbose=verbose)
+        self.gt_boxes = load_gt(self.nusc, self.eval_set, DetectionBox_modified, verbose=verbose, pred_boxes_sample_tokens=self.pred_boxes.sample_tokens)
 
         assert set(self.pred_boxes.sample_tokens) == set(self.gt_boxes.sample_tokens), \
             "Samples in split doesn't match samples in predictions."

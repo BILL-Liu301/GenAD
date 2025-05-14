@@ -128,7 +128,7 @@ class GenAD(MVXTwoStageDetector):
                           ego_fut_cmd=None,
                           ego_lcf_feat=None,
                           gt_attr_labels=None,
-                          description_feat=None
+                          description_feats=None
                           ):
         """Forward function'
         Args:
@@ -151,7 +151,7 @@ class GenAD(MVXTwoStageDetector):
             ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,
             gt_labels_3d=gt_labels_3d, gt_attr_labels=gt_attr_labels,
             ego_fut_trajs=ego_fut_trajs, ego_fut_cmd=ego_fut_cmd,
-            description_feat=description_feat
+            description_feats=description_feats
         )
 
         # 计算loss
@@ -260,17 +260,21 @@ class GenAD(MVXTwoStageDetector):
         prev_bev = self.obtain_history_bev(prev_img, prev_img_metas) if len_queue > 1 else None  # 先self.extract_feat后self.pts_bbox_head
 
         if self.use_description:
-            # 将description_answer转换为description_feat
-            description_feat = []
-            for des in kwargs['description_answer']:
+            # 将answers转换为description_feats
+            description_feats = []
+            answers = kwargs['answers'][0]
+            for des in answers:
                 des = des.item()
-                des = des.split('<answer>')[1].split('<|endofchunk|>')[0]  # 只取精华
                 des_feat = self.description_head(des, prev_bev.device).to(prev_bev.dtype)
-                description_feat.append(des_feat)
-            description_feat = torch.cat(description_feat, dim=0)
-            description_feat = description_feat.permute(1, 0, 2)  # [n, B, 256]
+                des_feat = des_feat.permute(1, 0, 2)  # [n, B, 256]
+                description_feats.append(des_feat)
+            description_feats = {
+                'bev': description_feats[0],
+                'motion': description_feats[1],
+                'map': description_feats[2]
+            }
         else:
-            description_feat = None
+            description_feats = None
 
         # 提取图像特征
         img_metas = [each[len_queue-1] for each in img_metas]
@@ -286,7 +290,7 @@ class GenAD(MVXTwoStageDetector):
             ego_his_trajs=ego_his_trajs, ego_fut_trajs=ego_fut_trajs,
             ego_fut_masks=ego_fut_masks, ego_fut_cmd=ego_fut_cmd,
             ego_lcf_feat=ego_lcf_feat, gt_attr_labels=gt_attr_labels,
-            description_feat=description_feat
+            description_feats=description_feats
         )
 
         losses.update(losses_pts)
@@ -371,17 +375,17 @@ class GenAD(MVXTwoStageDetector):
         """Test function without augmentaiton."""
 
         if self.use_description:
-            # 将description_answer转换为description_feat
-            description_feat = []
+            # 将description_answer转换为description_feats
+            description_feats = []
             for des in kwargs['description_answer']:
                 des = flatten_data_from_list(des).item()
                 des = des.split('<answer>')[1].split('<|endofchunk|>')[0]  # 只取精华
                 des_feat = self.description_head(des, img.device).to(img.dtype)
-                description_feat.append(des_feat)
-            description_feat = torch.cat(description_feat, dim=0)
-            description_feat = description_feat.permute(1, 0, 2)  # [n, B, 256]
+                description_feats.append(des_feat)
+            description_feats = torch.cat(description_feats, dim=0)
+            description_feats = description_feats.permute(1, 0, 2)  # [n, B, 256]
         else:
-            description_feat = None
+            description_feats = None
 
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
         bbox_list = [dict() for i in range(len(img_metas))]
@@ -400,7 +404,7 @@ class GenAD(MVXTwoStageDetector):
             ego_fut_cmd=ego_fut_cmd,
             ego_lcf_feat=ego_lcf_feat,
             gt_attr_labels=gt_attr_labels,
-            description_feat=description_feat
+            description_feats=description_feats
         )
         for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
             result_dict['pts_bbox'] = pts_bbox
@@ -423,7 +427,7 @@ class GenAD(MVXTwoStageDetector):
         ego_fut_cmd=None,
         ego_lcf_feat=None,
         gt_attr_labels=None,
-        description_feat=None
+        description_feats=None
     ):
         """Test function"""
         mapped_class_names = [
@@ -436,7 +440,7 @@ class GenAD(MVXTwoStageDetector):
         outs = self.pts_bbox_head(
             x, img_metas, prev_bev=prev_bev,
             ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,ego_fut_cmd=ego_fut_cmd,
-            description_feat=description_feat
+            description_feats=description_feats
         )
         bbox_list = self.pts_bbox_head.get_bboxes(outs, img_metas, rescale=rescale)
 

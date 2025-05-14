@@ -1,3 +1,4 @@
+import clip.model
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,28 +9,43 @@ class DescriptionHead(nn.Module):
     def __init__(self):
         super(DescriptionHead, self).__init__()
         self.dtype = torch.float32
+        self.context_length = 128
+        self.transformer_width = 512
+        self.transformer_heads = 8
+        self.transformer_layers = 12
+        self.embed_dim = 256
 
-        model, _ = clip.load('ViT-B/32')
-        model = model.train()
-        model = model.to(self.dtype)
-
-        self.token_embedding = model.token_embedding
-        self.positional_embedding = model.positional_embedding
-        self.transformer = model.transformer
-        self.ln_final = model.ln_final
-        # self.text_projection = model.text_projection
-        self.mlp = nn.Sequential(
-            nn.Linear(512, 512, dtype=self.dtype),
-            nn.ReLU(),
-            nn.LayerNorm(512, dtype=self.dtype),
-            nn.Linear(512, 256, dtype=self.dtype),
-            nn.ReLU(),
-            nn.LayerNorm(256, dtype=self.dtype)
+        # 参考CLIP的实现
+        self.token_embedding = nn.Embedding(49408, self.transformer_width)
+        self.positional_embedding = nn.Parameter(torch.randn(self.context_length, self.transformer_width, requires_grad=True))
+        self.transformer = clip.model.Transformer(
+            width=self.transformer_width,
+            layers=self.transformer_layers,
+            heads=self.transformer_heads,
+            attn_mask=self.build_attention_mask()
         )
+        self.ln_final = clip.model.LayerNorm(self.transformer_width)
+
+        self.mlp = nn.Sequential(
+            nn.Linear(self.transformer_width, self.transformer_width),
+            nn.ReLU(),
+            nn.LayerNorm(self.transformer_width),
+            nn.Linear(self.transformer_width, self.embed_dim),
+            nn.ReLU(),
+            nn.LayerNorm(self.embed_dim)
+        )
+
+    def build_attention_mask(self):
+        # lazily create causal attention mask, with full attention between the vision tokens
+        # pytorch uses additive attention mask; fill with -inf
+        mask = torch.empty(self.context_length, self.context_length)
+        mask.fill_(float("-inf"))
+        mask.triu_(1)  # zero out the lower diagonal
+        return mask
 
     def forward(self, description, device):
         assert isinstance(description, str)
-        tokenize = clip.tokenize(description, truncate=True)
+        tokenize = clip.tokenize(description, self.context_length, truncate=False)
         text_feat = self.encode_text(tokenize.to(device))
         return text_feat
 

@@ -554,7 +554,7 @@ class GenADHead(DETRHead):
                 gt_attr_labels=None,
                 ego_fut_trajs=None,
                 ego_fut_cmd=None,
-                description_feat=None
+                description_feats=None
                 ):
         """Forward function.
         Args:
@@ -619,7 +619,7 @@ class GenADHead(DETRHead):
                 map_cls_branches=self.map_cls_branches if self.as_two_stage else None,
                 img_metas=img_metas,
                 prev_bev=prev_bev,
-                description_feat=description_feat,
+                description_feat=description_feats['bev'],
                 bev_query_pos=self.bev_query_pos.weight if self.use_description and self.description_ca_bev else None,
                 description_bev_ca=self.description_bev_ca if self.use_description and self.description_ca_bev else None
             )
@@ -638,6 +638,7 @@ class GenADHead(DETRHead):
             # 将map_hs和vlm提取的特征进行特征融合
             map_hs = map_hs.permute(1, 0, 2, 3).flatten(1, 2)  # [3, 2000, 1, 256] -> [2000, 3, 1, 256] -> [2000, 3, 256]
             map_query_pos = self.map_query_pos.weight.unsqueeze(1).repeat(1, map_hs.shape[1], 1).to(dtype)  # [2000, 256] -> [2000, 3, 256]
+            description_feat = description_feats['map']
             map_hs = self.description_map_ca(  # [2000, 3, 256]
                 query=map_hs,
                 key=description_feat.repeat(1, map_hs.shape[1], 1),
@@ -753,6 +754,7 @@ class GenADHead(DETRHead):
 
             if self.use_description and self.description_ca_motion:
                 # 将motion_query和vlm提取的特征进行特征融合
+                description_feat = description_feats['motion']
                 motion_query = self.description_motion_ca(
                     query=motion_query,
                     key=description_feat,

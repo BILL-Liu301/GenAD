@@ -52,8 +52,8 @@ class CustomDefaultFormatBundle3D(DefaultFormatBundle3D):
             if 'gt_attr_labels' in results:
                 results['gt_attr_labels'] = DC(to_tensor(results['gt_attr_labels']), cpu_only=False)\
         
-        if 'description_question' in results:
-            results['description_question'] = DC(np.array(results['description_question']).reshape(1, 1, -1), cpu_only=True, stack=True)
-        if 'description_answer' in results:
-            results['description_answer'] = DC(np.array(results['description_answer']).reshape(1, 1, -1), cpu_only=True, stack=True)
+        if 'contents' in results:
+            results['contents'] = DC(np.array(results['contents']).reshape(-1), cpu_only=True, stack=False)
+        if 'answers' in results:
+            results['answers'] = DC(np.array(results['answers']).reshape(-1), cpu_only=True, stack=False)
         return results

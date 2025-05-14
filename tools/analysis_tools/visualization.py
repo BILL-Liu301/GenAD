@@ -819,8 +819,8 @@ def run(sample_token_list, results_, results_input_, out_path, video_name):
         # 保存输入数据中的description
         description = {
             'sample_token': sample_token,
-            'question': results_input_[sample_token]['description_question'][0].data[0][0].item(),
-            'answer': results_input_[sample_token]['description_answer'][0].data[0][0].item()
+            'contents': results_input_[sample_token]['contents'][0].data[0][0].item(),
+            'answers': results_input_[sample_token]['answers'][0].data[0][0].item()
         }
         mmcv.dump(description, osp.join(out_path, 'samples', f'des_{file_id}.json'), indent=4)
 

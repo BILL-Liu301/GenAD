@@ -202,6 +202,23 @@ class GenAD(MVXTwoStageDetector):
             self.train()
             return prev_bev
 
+    def get_description_feats(self, dtype, device, **kwargs):
+        # 将answers转换为description_feats
+        description_feats = []
+        # answers = flatten_data_from_list(kwargs['answers'])
+        answers = flatten_data_from_list(kwargs['answers_token'])
+        for des in answers:
+            # des_feat = self.description_head(text=des.item(), device=device).to(dtype)
+            des_feat = self.description_head(tokens=des, device=device).to(dtype)
+            des_feat = des_feat.permute(1, 0, 2)  # [n, B, 256]
+            description_feats.append(des_feat)
+        description_feats = {
+            'bev': description_feats[0],
+            'motion': description_feats[1],
+            'map': description_feats[2]
+        }
+        return description_feats
+
     # @auto_fp16(apply_to=('img', 'points'))
     @force_fp32(apply_to=('img','points','prev_bev'))
     def forward_train(self,
@@ -260,19 +277,21 @@ class GenAD(MVXTwoStageDetector):
         prev_bev = self.obtain_history_bev(prev_img, prev_img_metas) if len_queue > 1 else None  # 先self.extract_feat后self.pts_bbox_head
 
         if self.use_description:
-            # 将answers转换为description_feats
-            description_feats = []
-            answers = kwargs['answers'][0]
-            for des in answers:
-                des = des.item()
-                des_feat = self.description_head(des, prev_bev.device).to(prev_bev.dtype)
-                des_feat = des_feat.permute(1, 0, 2)  # [n, B, 256]
-                description_feats.append(des_feat)
-            description_feats = {
-                'bev': description_feats[0],
-                'motion': description_feats[1],
-                'map': description_feats[2]
-            }
+            # # 将answers转换为description_feats
+            # description_feats = []
+            # answers = kwargs['answers'][0]
+            # # answers_token = kwargs['answers_token'][0]
+            # for des in answers:
+            #     des_feat = self.description_head(text=des.item(), device=prev_bev.device).to(prev_bev.dtype)
+            #     # des_feat = self.description_head(tokens=des, device=prev_bev.device).to(prev_bev.dtype)
+            #     des_feat = des_feat.permute(1, 0, 2)  # [n, B, 256]
+            #     description_feats.append(des_feat)
+            # description_feats = {
+            #     'bev': description_feats[0],
+            #     'motion': description_feats[1],
+            #     'map': description_feats[2]
+            # }
+            description_feats = self.get_description_feats(prev_bev.dtype, prev_bev.device, **kwargs)
         else:
             description_feats = None
 
@@ -375,15 +394,16 @@ class GenAD(MVXTwoStageDetector):
         """Test function without augmentaiton."""
 
         if self.use_description:
-            # 将description_answer转换为description_feats
-            description_feats = []
-            for des in kwargs['description_answer']:
-                des = flatten_data_from_list(des).item()
-                des = des.split('<answer>')[1].split('<|endofchunk|>')[0]  # 只取精华
-                des_feat = self.description_head(des, img.device).to(img.dtype)
-                description_feats.append(des_feat)
-            description_feats = torch.cat(description_feats, dim=0)
-            description_feats = description_feats.permute(1, 0, 2)  # [n, B, 256]
+            # # 将description_answer转换为description_feats
+            # description_feats = []
+            # for des in kwargs['description_answer']:
+            #     des = flatten_data_from_list(des).item()
+            #     des = des.split('<answer>')[1].split('<|endofchunk|>')[0]  # 只取精华
+            #     des_feat = self.description_head(des, img.device).to(img.dtype)
+            #     description_feats.append(des_feat)
+            # description_feats = torch.cat(description_feats, dim=0)
+            # description_feats = description_feats.permute(1, 0, 2)  # [n, B, 256]
+            description_feats = self.get_description_feats(img.dtype, img.device, **kwargs)
         else:
             description_feats = None
 

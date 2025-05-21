@@ -391,7 +391,7 @@ train_pipeline = [
                'ego_fut_trajs', 'ego_fut_masks', 'ego_fut_cmd', 'ego_lcf_feat', 'gt_attr_labels',
             #    'road_type', 'road_type_one_hot', 'road_type_all',
             #    'traffic_condition', 'traffic_condition_one_hot', 'traffic_condition_all',
-               'contents', 'answers'
+               'contents', 'answers', 'answers_token'
                ])
 ]
 
@@ -422,7 +422,7 @@ test_pipeline = [
                        'ego_lcf_feat', 'gt_attr_labels',
                     #    'road_type', 'road_type_one_hot', 'road_type_all',
                     #    'traffic_condition', 'traffic_condition_one_hot', 'traffic_condition_all',
-                       'contents', 'answers'
+                       'contents', 'answers', 'answers_token'
                     ])])
 ]
 

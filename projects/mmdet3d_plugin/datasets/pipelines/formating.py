@@ -56,4 +56,6 @@ class CustomDefaultFormatBundle3D(DefaultFormatBundle3D):
             results['contents'] = DC(np.array(results['contents']).reshape(-1), cpu_only=True, stack=False)
         if 'answers' in results:
             results['answers'] = DC(np.array(results['answers']).reshape(-1), cpu_only=True, stack=False)
+        if 'answers_token' in results:
+            results['answers_token'] = DC(np.array(results['answers_token']), cpu_only=True, stack=False)
         return results

@@ -205,11 +205,11 @@ class GenAD(MVXTwoStageDetector):
     def get_description_feats(self, dtype, device, **kwargs):
         # 将answers转换为description_feats
         description_feats = []
-        # answers = flatten_data_from_list(kwargs['answers'])
-        answers = flatten_data_from_list(kwargs['answers_token'])
+        answers = flatten_data_from_list(kwargs['answers'])
+        # answers = flatten_data_from_list(kwargs['answers_token'])
         for des in answers:
-            # des_feat = self.description_head(text=des.item(), device=device).to(dtype)
-            des_feat = self.description_head(tokens=des, device=device).to(dtype)
+            des_feat = self.description_head(text=des.item(), device=device).to(dtype)
+            # des_feat = self.description_head(tokens=des, device=device).to(dtype)
             des_feat = des_feat.permute(1, 0, 2)  # [n, B, 256]
             description_feats.append(des_feat)
         description_feats = {

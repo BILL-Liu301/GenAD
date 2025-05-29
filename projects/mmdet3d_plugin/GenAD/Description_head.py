@@ -16,8 +16,8 @@ class DescriptionHead(nn.Module):
         self.embed_dim = 256
 
         # 参考CLIP的实现
-        # self.token_embedding = nn.Embedding(49408, self.transformer_width)
-        self.token_embedding = nn.Embedding(129280, self.transformer_width)
+        self.token_embedding = nn.Embedding(49408, self.transformer_width)
+        # self.token_embedding = nn.Embedding(129280, self.transformer_width)
         self.positional_embedding = nn.Parameter(torch.randn(self.context_length, self.transformer_width, requires_grad=True))
         self.transformer = clip.model.Transformer(
             width=self.transformer_width,

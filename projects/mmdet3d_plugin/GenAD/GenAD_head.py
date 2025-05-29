@@ -619,7 +619,7 @@ class GenADHead(DETRHead):
                 map_cls_branches=self.map_cls_branches if self.as_two_stage else None,
                 img_metas=img_metas,
                 prev_bev=prev_bev,
-                description_feat=description_feats['bev'],
+                description_feat=description_feats['bev'] if self.use_description and self.description_ca_bev else None,
                 bev_query_pos=self.bev_query_pos.weight if self.use_description and self.description_ca_bev else None,
                 description_bev_ca=self.description_bev_ca if self.use_description and self.description_ca_bev else None
             )

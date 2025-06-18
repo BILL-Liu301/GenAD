@@ -1626,10 +1626,11 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
                 else:
                     pass
             
-            # 将input信息也保存下来
-            mmcv.mkdir_or_exist(jsonfile_prefix)
-            res_path = osp.join(jsonfile_prefix, f'{file_name}_input.pkl')
-            mmcv.dump(result_input, res_path)
+            # # 将input信息也保存下来
+            # 这里太卡了，蚌埠住了，先注释掉
+            # mmcv.mkdir_or_exist(jsonfile_prefix)
+            # res_path = osp.join(jsonfile_prefix, f'{file_name}_input.pkl')
+            # mmcv.dump(result_input, res_path)
         return result_files, tmp_dir
 
     def _evaluate_single(self,

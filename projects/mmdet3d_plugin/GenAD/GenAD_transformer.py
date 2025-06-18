@@ -315,7 +315,10 @@ class GenADPerceptionTransformer(BaseModule):
                 cls_branches=None,
                 map_reg_branches=None,
                 map_cls_branches=None,                
-                prev_bev=None,            
+                prev_bev=None,
+                description_feat=None,
+                bev_query_pos=None,
+                description_bev_ca=None,
                 **kwargs):
         """Forward function for `Detr3DTransformer`.
         Args:
@@ -363,6 +366,16 @@ class GenADPerceptionTransformer(BaseModule):
             bev_pos=bev_pos,
             prev_bev=prev_bev,
             **kwargs)  # bev_embed shape: bs, bev_h*bev_w, embed_dims
+
+        if description_bev_ca is not None and description_feat is not None:
+            bev_query_pos = bev_query_pos.unsqueeze(1).to(bev_embed.dtype)  # [10000, 1, 256]
+            # 将bev_embed和vlm提取的特征进行特征融合
+            bev_embed = description_bev_ca(
+                query=bev_embed.permute(1, 0, 2),
+                key=description_feat,
+                value=description_feat,
+                query_pos=bev_query_pos
+            ).permute(1, 0, 2)
 
         bs = mlvl_feats[0].size(0)
         query_pos, query = torch.split(object_query_embed, self.embed_dims, dim=1)  # [300, 512] -> [300, 256] + [300, 256]

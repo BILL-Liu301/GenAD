@@ -262,7 +262,7 @@ def get_predicted_data(sample_data_token: str,
     return data_path, box_list, cam_intrinsic
 
 
-def lidiar_render(sample_token, data, data_input, out_path=None, out_name=None, traj_use_perstep_offset=True):
+def lidiar_render(sample_token, data, out_path=None, out_name=None, traj_use_perstep_offset=True, file_id=None):
     bbox_gt_list = []
     bbox_pred_list = []
     sample_rec = nusc.get('sample', sample_token)
@@ -318,7 +318,8 @@ def lidiar_render(sample_token, data, data_input, out_path=None, out_name=None, 
     visualize_sample(
         nusc, sample_token, gt_annotations, pred_annotations,
         savepath=out_path, traj_use_perstep_offset=traj_use_perstep_offset, 
-        pred_data=data, data_input=data_input
+        pred_data=data,
+        file_id=file_id
     )
 
 
@@ -507,7 +508,8 @@ def visualize_sample(nusc: NuScenes,
                      gt_format=['fixed_num_pts'],
                      colors_plt = ['red', 'green', 'blue'], #['cornflowerblue', 'royalblue', 'slategrey'],
                      pred_data = None,
-                     data_input=None) -> None:
+                     file_id=None
+                     ) -> None:
     """
     Visualizes a sample from BEV with annotations and detection results.
     :param nusc: NuScenes object.
@@ -536,48 +538,47 @@ def visualize_sample(nusc: NuScenes,
     for box_est, box_est_global in zip(boxes_est, boxes_est_global):
         box_est.score = box_est_global.detection_score
 
+    xlim = [-30, 30]
+    ylim = [-30, 30]
+
     # Init axes.
     fig, axes = plt.subplots(1, 1, figsize=(4, 4))
-    plt.xlim(xmin=-30, xmax=30)
-    plt.ylim(ymin=-30, ymax=30)
-
-    # # 展示Cmd
-    # cmd = data_input['ego_fut_cmd'][0].data[0].argmax().cpu().numpy()
-    # cmd_name = ''
-    # if cmd == 0:
-    #     cmd_name = 'Turn Right'
-    # elif cmd == 1:
-    #     cmd_name = 'Turn Left'
-    # elif cmd == 2:
-    #     cmd_name = 'Forward'
-    # elif cmd == 3:
-    #     assert False, 'Error: Unknown cmd!'
-    # bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3')
-    # plt.text(0.0, 0.0, cmd_name, ha='center', va='center', bbox=bbox)
-
-    # 展示description
-    description_results = pred_data['description_results'][sample_token]
-    description_vlm = description_results['vlm']
-    description_gt = description_results['gt']
-    description_text = ''
-    for k in description_vlm:
-        description_text += f'{k} ({description_gt[k].item()}):\n'
-        k_all = description_gt[f'{k}_all'].squeeze(0).squeeze(0)
-        k_prob = description_vlm[k].squeeze(0).squeeze(0)
-        assert len(k_all.shape) == len(k_prob.shape) == 1
-        for name, prob in zip(k_all, k_prob):
-            assert len(name) <= 15
-            name_ = name.ljust(15)
-            pb = f'{prob * 100:.2f} %'
-            description_text += f'{name_}: {pb}\n'
-    description_text = description_text.rstrip()
-    bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3')
-    plt.text(-30.0, 30.0, description_text, ha='left', va='top', bbox=bbox, fontsize=7)
+    plt.xlim(*xlim)
+    plt.ylim(*ylim)
 
     # Show Pred Map
-
     result_dic = pred_data['map_results'][sample_token]['vectors']
+    draw_map(fig, result_dic, axes, colors_plt)
 
+    # Show Agents
+    draw_agents(fig, boxes_est, axes, conf_th, traj_use_perstep_offset)
+
+    # Show Planning
+    drwa_plnning(fig, pred_data, sample_token, axes)
+
+    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_{file_id}.png'), bbox_inches='tight', dpi=200)
+    title = savepath.split('/')[-1]
+    plt.title(title)
+    plt.savefig(savepath+'/bev_pred.png', bbox_inches='tight', dpi=200)
+    plt.close()
+
+    fig_, axes = plt.subplots(1, 1, figsize=(4, 4))
+    plt.xlim(*xlim)
+    plt.ylim(*ylim)
+    result_dic = pred_data['map_results'][sample_token]['vectors']
+    draw_map(fig, result_dic, axes, colors_plt)
+    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_map_{file_id}.png'), bbox_inches='tight', dpi=200)
+    plt.close()
+
+    fig_, axes = plt.subplots(1, 1, figsize=(4, 4))
+    plt.xlim(*xlim)
+    plt.ylim(*ylim)
+    draw_agents(fig, boxes_est, axes, conf_th, traj_use_perstep_offset)
+    drwa_plnning(fig, pred_data, sample_token, axes)
+    plt.savefig(osp.join(savepath, 'samples', f'bev_pred_agents_{file_id}.png'), bbox_inches='tight', dpi=200)
+    plt.close()
+
+def draw_map(fig, result_dic, axes, colors_plt):
     for vector in result_dic:
         if vector['confidence_level'] < 0.6:
             continue
@@ -588,8 +589,13 @@ def visualize_sample(nusc: NuScenes,
 
         axes.plot(pts_x, pts_y, color=colors_plt[pred_label_3d],linewidth=2,alpha=0.8,zorder=-1)
         axes.scatter(pts_x, pts_y, color=colors_plt[pred_label_3d],s=1,alpha=0.8,zorder=-1)
+    axes.axes.xaxis.set_ticks([])
+    axes.axes.yaxis.set_ticks([])
+    axes.axis('off')
+    fig.set_tight_layout(True)
+    fig.canvas.draw()
 
-
+def draw_agents(fig, boxes_est, axes, conf_th, traj_use_perstep_offset):
     # ignore_list = ['barrier', 'motorcycle', 'bicycle', 'traffic_cone']
     ignore_list = ['barrier', 'bicycle', 'traffic_cone']
 
@@ -630,6 +636,13 @@ def visualize_sample(nusc: NuScenes,
         else:
             box.render_fut_trajs_coords(axes, color='tomato', linewidth=1)
 
+    axes.axes.xaxis.set_ticks([])
+    axes.axes.yaxis.set_ticks([])
+    axes.axis('off')
+    fig.set_tight_layout(True)
+    fig.canvas.draw()
+
+def drwa_plnning(fig, pred_data, sample_token, axes):
     # Show Planning.
     axes.plot([-0.9, -0.9], [-2, 2], color='mediumseagreen', linewidth=3, alpha=0.8)
     axes.plot([-0.9, 0.9], [2, 2], color='mediumseagreen', linewidth=3, alpha=0.8)
@@ -661,15 +674,11 @@ def visualize_sample(nusc: NuScenes,
     line_segments = LineCollection(plan_vecs, colors=colors, linewidths=6, linestyles='solid', cmap=cmap)
     axes.add_collection(line_segments)
 
-
     axes.axes.xaxis.set_ticks([])
     axes.axes.yaxis.set_ticks([])
     axes.axis('off')
     fig.set_tight_layout(True)
     fig.canvas.draw()
-    plt.savefig(savepath+'/bev_pred.png', bbox_inches='tight', dpi=200)
-    plt.close()
-
 
 def obtain_sensor2top(nusc,
                       sensor_token,
@@ -751,8 +760,8 @@ def render_sample_data(
         verbose: bool = True,
         show_panoptic: bool = False,
         pred_data=None,
-        data_input=None,
-        traj_use_perstep_offset: bool = True
+        traj_use_perstep_offset: bool = True,
+        file_id=None,
       ) -> None:
     """
     Render sample data onto axis.
@@ -781,17 +790,16 @@ def render_sample_data(
         If show_lidarseg is True, show_panoptic will be set to False.
     """
     lidiar_render(
-        sample_toekn, pred_data, data_input, out_path=out_path,
-        out_name=out_name, traj_use_perstep_offset=traj_use_perstep_offset
+        sample_toekn, pred_data, out_path=out_path,
+        out_name=out_name, traj_use_perstep_offset=traj_use_perstep_offset,
+        file_id=file_id
     )
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Visualize VAD predictions')
     parser.add_argument('--result_path', help='inference result file path')
-    parser.add_argument('--result_input_path', help='input of inference result file path')
-    parser.add_argument('--result_change_cmd_path', help='inference result_change_cmd file path')
-    parser.add_argument('--result_change_cmd_input_path', help='input of inference result_change_cmd file path')
+    parser.add_argument('--result_input_path', default=None, help='input of inference result file path')
     parser.add_argument('--save_path', help='the dir to save visualization results')
     args = parser.parse_args()
 
@@ -802,20 +810,31 @@ def run(sample_token_list, results_, results_input_, out_path, video_name):
     video_path = osp.join(out_path, video_name)
     video = cv2.VideoWriter(video_path, fourcc, 10, (2933, 800), True)
 
-    for id in tqdm(range(len(sample_token_list))):
+    for i, sample_token in tqdm(enumerate(sample_token_list), total=len(sample_token_list)):
         mmcv.mkdir_or_exist(out_path)
+        mmcv.mkdir_or_exist(osp.join(out_path, 'samples'))
+        # file_id = sample_token
+        file_id = str(i)
+
+        # 保存输入数据中的description
+        description = {
+            'sample_token': sample_token,
+            'contents': results_input_[sample_token]['contents'][0].data[0][0].item(),
+            'answers': results_input_[sample_token]['answers'][0].data[0][0].item()
+        }
+        mmcv.dump(description, osp.join(out_path, 'samples', f'des_{file_id}.json'), indent=4)
+
         # 此处就会绘制BEV图
         render_sample_data(
-            sample_token_list[id],
+            sample_token,
             pred_data=results_,
-            data_input=results_input_[id],
-            out_path=out_path
+            out_path=out_path,
+            file_id=file_id
         )
         pred_path = osp.join(out_path, 'bev_pred.png')
         pred_img = cv2.imread(pred_path)
         os.remove(pred_path)
 
-        sample_token = sample_token_list[id]
         sample = nusc.get('sample', sample_token)
         cams = [
             'CAM_FRONT_LEFT',
@@ -848,70 +867,66 @@ def run(sample_token_list, results_, results_input_, out_path, video_name):
                 _, ax = plt.subplots(1, 1, figsize=(6, 12))
                 ax.imshow(data)
 
-                if cam == 'CAM_FRONT':
-                    lidar_sd_record =  nusc.get('sample_data', sample['data']['LIDAR_TOP'])
-                    lidar_cs_record = nusc.get('calibrated_sensor', lidar_sd_record['calibrated_sensor_token'])
-                    lidar_pose_record = nusc.get('ego_pose', lidar_sd_record['ego_pose_token'])
-
-                    # get plan traj [x,y,z,w] quaternion, w=1
-                    # we set z=-1 to get points near the ground in lidar coord system
-                    plan_cmd = np.argmax(results_['plan_results'][sample_token][1][0,0,0])
-                    plan_traj = results_['plan_results'][sample_token][0][plan_cmd]
-                    plan_traj[abs(plan_traj) < 0.01] = 0.0
-                    plan_traj = plan_traj.cumsum(axis=0)
-
-                    plan_traj = np.concatenate((
-                        plan_traj[:, [0]],
-                        plan_traj[:, [1]],
-                        -1.0*np.ones((plan_traj.shape[0], 1)),
-                        np.ones((plan_traj.shape[0], 1)),
-                    ), axis=1)
-                    # add the start point in lcf
-                    plan_traj = np.concatenate((np.zeros((1, plan_traj.shape[1])), plan_traj), axis=0)
-                    # plan_traj[0, :2] = 2*plan_traj[1, :2] - plan_traj[2, :2]
-                    plan_traj[0, 0] = 0.3
-                    plan_traj[0, 2] = -1.0
-                    plan_traj[0, 3] = 1.0
-
-                    l2e_r = lidar_cs_record['rotation']
-                    l2e_t = lidar_cs_record['translation']
-                    e2g_r = lidar_pose_record['rotation']
-                    e2g_t = lidar_pose_record['translation']
-                    l2e_r_mat = Quaternion(l2e_r).rotation_matrix
-                    e2g_r_mat = Quaternion(e2g_r).rotation_matrix
-                    s2l_r, s2l_t = obtain_sensor2top(nusc, sample_data_token, l2e_t, l2e_r_mat, e2g_t, e2g_r_mat, cam)
-                    # obtain lidar to image transformation matrix
-                    lidar2cam_r = np.linalg.inv(s2l_r)
-                    lidar2cam_t = s2l_t @ lidar2cam_r.T
-                    lidar2cam_rt = np.eye(4)
-                    lidar2cam_rt[:3, :3] = lidar2cam_r.T
-                    lidar2cam_rt[3, :3] = -lidar2cam_t
-                    viewpad = np.eye(4)
-                    viewpad[:camera_intrinsic.shape[0], :camera_intrinsic.shape[1]] = camera_intrinsic
-                    lidar2img_rt = (viewpad @ lidar2cam_rt.T)
-                    plan_traj = lidar2img_rt @ plan_traj.T
-                    plan_traj = plan_traj[0:2, ...] / np.maximum(
-                        plan_traj[2:3, ...], np.ones_like(plan_traj[2:3, ...]) * 1e-5)
-                    plan_traj = plan_traj.T
-                    plan_traj = np.stack((plan_traj[:-1], plan_traj[1:]), axis=1)
-
-                    plan_vecs = None
-                    for i in range(plan_traj.shape[0]):
-                        plan_vec_i = plan_traj[i]
-                        x_linspace = np.linspace(plan_vec_i[0, 0], plan_vec_i[1, 0], 51)
-                        y_linspace = np.linspace(plan_vec_i[0, 1], plan_vec_i[1, 1], 51)
-                        xy = np.stack((x_linspace, y_linspace), axis=1)
-                        xy = np.stack((xy[:-1], xy[1:]), axis=1)
-                        if plan_vecs is None:
-                            plan_vecs = xy
-                        else:
-                            plan_vecs = np.concatenate((plan_vecs, xy), axis=0)
-
-                    cmap = 'summer'
-                    y = np.sin(np.linspace(1/2*np.pi, 3/2*np.pi, 301))
-                    colors = color_map(y[:-1], cmap)
-                    line_segments = LineCollection(plan_vecs, colors=colors, linewidths=2, linestyles='solid', cmap=cmap)
-                    ax.add_collection(line_segments)
+                # # 在前视视角中加入轨迹线
+                # if cam == 'CAM_FRONT':
+                #     lidar_sd_record =  nusc.get('sample_data', sample['data']['LIDAR_TOP'])
+                #     lidar_cs_record = nusc.get('calibrated_sensor', lidar_sd_record['calibrated_sensor_token'])
+                #     lidar_pose_record = nusc.get('ego_pose', lidar_sd_record['ego_pose_token'])
+                #     # get plan traj [x,y,z,w] quaternion, w=1
+                #     # we set z=-1 to get points near the ground in lidar coord system
+                #     plan_cmd = np.argmax(results_['plan_results'][sample_token][1][0,0,0])
+                #     plan_traj = results_['plan_results'][sample_token][0][plan_cmd]
+                #     plan_traj[abs(plan_traj) < 0.01] = 0.0
+                #     plan_traj = plan_traj.cumsum(axis=0)
+                #     plan_traj = np.concatenate((
+                #         plan_traj[:, [0]],
+                #         plan_traj[:, [1]],
+                #         -1.0*np.ones((plan_traj.shape[0], 1)),
+                #         np.ones((plan_traj.shape[0], 1)),
+                #     ), axis=1)
+                #     # add the start point in lcf
+                #     plan_traj = np.concatenate((np.zeros((1, plan_traj.shape[1])), plan_traj), axis=0)
+                #     # plan_traj[0, :2] = 2*plan_traj[1, :2] - plan_traj[2, :2]
+                #     plan_traj[0, 0] = 0.3
+                #     plan_traj[0, 2] = -1.0
+                #     plan_traj[0, 3] = 1.0
+                #     l2e_r = lidar_cs_record['rotation']
+                #     l2e_t = lidar_cs_record['translation']
+                #     e2g_r = lidar_pose_record['rotation']
+                #     e2g_t = lidar_pose_record['translation']
+                #     l2e_r_mat = Quaternion(l2e_r).rotation_matrix
+                #     e2g_r_mat = Quaternion(e2g_r).rotation_matrix
+                #     s2l_r, s2l_t = obtain_sensor2top(nusc, sample_data_token, l2e_t, l2e_r_mat, e2g_t, e2g_r_mat, cam)
+                #     # obtain lidar to image transformation matrix
+                #     lidar2cam_r = np.linalg.inv(s2l_r)
+                #     lidar2cam_t = s2l_t @ lidar2cam_r.T
+                #     lidar2cam_rt = np.eye(4)
+                #     lidar2cam_rt[:3, :3] = lidar2cam_r.T
+                #     lidar2cam_rt[3, :3] = -lidar2cam_t
+                #     viewpad = np.eye(4)
+                #     viewpad[:camera_intrinsic.shape[0], :camera_intrinsic.shape[1]] = camera_intrinsic
+                #     lidar2img_rt = (viewpad @ lidar2cam_rt.T)
+                #     plan_traj = lidar2img_rt @ plan_traj.T
+                #     plan_traj = plan_traj[0:2, ...] / np.maximum(
+                #         plan_traj[2:3, ...], np.ones_like(plan_traj[2:3, ...]) * 1e-5)
+                #     plan_traj = plan_traj.T
+                #     plan_traj = np.stack((plan_traj[:-1], plan_traj[1:]), axis=1)
+                #     plan_vecs = None
+                #     for i in range(plan_traj.shape[0]):
+                #         plan_vec_i = plan_traj[i]
+                #         x_linspace = np.linspace(plan_vec_i[0, 0], plan_vec_i[1, 0], 51)
+                #         y_linspace = np.linspace(plan_vec_i[0, 1], plan_vec_i[1, 1], 51)
+                #         xy = np.stack((x_linspace, y_linspace), axis=1)
+                #         xy = np.stack((xy[:-1], xy[1:]), axis=1)
+                #         if plan_vecs is None:
+                #             plan_vecs = xy
+                #         else:
+                #             plan_vecs = np.concatenate((plan_vecs, xy), axis=0)
+                #     cmap = 'summer'
+                #     y = np.sin(np.linspace(1/2*np.pi, 3/2*np.pi, 301))
+                #     colors = color_map(y[:-1], cmap)
+                #     line_segments = LineCollection(plan_vecs, colors=colors, linewidths=2, linestyles='solid', cmap=cmap)
+                #     ax.add_collection(line_segments)
 
                 ax.set_xlim(0, data.size[0])
                 ax.set_ylim(data.size[1], 0)
@@ -924,6 +939,7 @@ def run(sample_token_list, results_, results_input_, out_path, video_name):
                 # Load boxes and image.
                 data_path = osp.join(out_path, f'{cam}_PRED.png')
                 cam_img = cv2.imread(data_path)
+                os.remove(data_path)
                 lw = 6
                 tf = max(lw - 3, 1)
                 w, h = cv2.getTextSize(cam, 0, fontScale=lw / 6, thickness=tf)[0]  # text width, height
@@ -964,18 +980,20 @@ def run(sample_token_list, results_, results_input_, out_path, video_name):
         cam_img_top = cv2.hconcat([cam_imgs[0], cam_imgs[1], cam_imgs[2]])
         cam_img_down = cv2.hconcat([cam_imgs[3], cam_imgs[4], cam_imgs[5]])
         cam_img = cv2.vconcat([cam_img_top, cam_img_down])
+        cv2.imwrite(osp.join(out_path, 'samples', f'CAMS_{file_id}.png'), cam_img)
         size = (2133, 800)
         cam_img = cv2.resize(cam_img, size)
         vis_img = cv2.hconcat([cam_img, sample_img])
 
-        video.write(vis_img)
+        cv2.imwrite(osp.join(out_path, f'{file_id}.png'), vis_img)
+        # video.write(vis_img)
 
-    # 等待视频生成完毕
-    while True:
-        if os.path.exists(video_path):
-            break
-        print(f'Waiting for {video_path} to be generated...')
-        time.sleep(1)
+    # # 等待视频生成完毕
+    # while True:
+    #     if os.path.exists(video_path):
+    #         break
+    #     print(f'Waiting for {video_path} to be generated...')
+    #     time.sleep(1)
     video.release()
     cv2.destroyAllWindows()
 
@@ -983,23 +1001,21 @@ if __name__ == '__main__':
     args = parse_args()
     inference_result_path = args.result_path
     inference_result_input_path = args.result_input_path
-    # inference_result_change_cmd_path = args.result_change_cmd_path
-    # inference_result_change_cmd_input_path = args.result_change_cmd_input_path
     out_path = args.save_path
 
     # 获取原始结果和改变了指令的结果
     results_origin = mmcv.load(inference_result_path)
-    results_origin_input = mmcv.load(inference_result_input_path)['input']
-    # results_change_cmd = mmcv.load(inference_result_change_cmd_path)
-    # results_change_cmd_input = mmcv.load(inference_result_change_cmd_input_path)['input']
+    results_input = mmcv.load(inference_result_input_path)
 
-    # # results_origin和results_change_cmd中result的key是一样的
-    # assert list(results_origin['results'].keys()) == list(results_change_cmd['results'].keys())
     sample_token_list = list(results_origin['results'].keys())
 
-    nusc = NuScenes(version='v1.0-mini', dataroot='/workspace/genad/GenAD/data/nuscenes', verbose=True)
-    
-    print('Visualizing for resuls_origin')
-    run(sample_token_list, results_origin, results_origin_input, out_path, 'results_origin.mp4')
-    # print('Visualizing for resuls_change_cmd')
-    # run(sample_token_list, results_change_cmd, results_change_cmd_input, out_path, 'results_change_cmd.mp4')
+    # nusc = NuScenes(version='v1.0-mini', dataroot='data/nuscenes', verbose=True)
+    nusc = NuScenes(version='v1.0-trainval', dataroot='data/nuscenes', verbose=True)
+
+    run(
+        sample_token_list, 
+        results_origin, 
+        results_input,
+        out_path, 
+        'results.mp4'
+    )

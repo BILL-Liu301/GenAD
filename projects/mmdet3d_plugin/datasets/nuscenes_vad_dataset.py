@@ -1310,7 +1310,9 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
             ego_fut_masks=info['gt_ego_fut_masks'],
             ego_fut_cmd=info['gt_ego_fut_cmd'],
             ego_lcf_feat=info['gt_ego_lcf_feat'],
-            **info['gt_descriptions']
+            contents=info['description']['contents'],
+            answers=info['description']['answers'],
+            answers_token=info['description']['answers_token']
         )
         # lidar to ego transform
         lidar2ego = np.eye(4).astype(np.float32)
@@ -1467,7 +1469,6 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
         map_mapped_class_names = self.MAPCLASSES
 
         plan_annos = {}
-        descriptions = {}
 
         print('Start to convert detection format...')
         # for sample_id, det in enumerate(mmcv.track_iter_progress(results)):
@@ -1541,11 +1542,6 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
             map_pred_anno['vectors'] = pred_vec_list
             map_pred_annos[sample_token] = map_pred_anno
 
-            descriptions[sample_token] = {
-                'vlm': det['vlm_descriptions'],
-                'gt': det['gt_descriptions']
-            }
-
         if not os.path.exists(self.map_ann_file):
             self._format_gt()
         else:
@@ -1559,7 +1555,6 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
             'results': nusc_annos,
             'map_results': map_pred_annos,
             'plan_results': plan_annos,
-            'description_results': descriptions
             # 'GTs': gt_annos
         }
 
@@ -1615,23 +1610,27 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
         else:
             # should take the inner dict out of 'pts_bbox' or 'img_bbox' dict
             result_files = dict()
-            result_input = {}
+            result_input = dict()
             for name in results[0]:
                 if name == 'pts_bbox':
                     print(f'\nFormating bboxes of {name}')
-                    results_ = [out[name] for out in results]
+                    results_ = [res[name] for res in results]
                     tmp_file_ = osp.join(jsonfile_prefix, name)
                     # 在此处规整
                     result_files.update({name: self._format_bbox(results_, file_name, jsonfile_prefix=tmp_file_)})
                 elif name == 'input':
-                    result_input.update({name: [out[name] for out in results]})
+                    inputs_ = [res[name] for res in results]
+                    for sample_id, input in enumerate(inputs_):
+                        sample_token = self.data_infos[sample_id]['token']
+                        result_input[sample_token] = input
                 else:
                     pass
             
-            # 将input信息也保存下来
-            mmcv.mkdir_or_exist(jsonfile_prefix)
-            res_path = osp.join(jsonfile_prefix, f'{file_name}_input.pkl')
-            mmcv.dump(result_input, res_path)
+            # # 将input信息也保存下来
+            # 这里太卡了，蚌埠住了，先注释掉
+            # mmcv.mkdir_or_exist(jsonfile_prefix)
+            # res_path = osp.join(jsonfile_prefix, f'{file_name}_input.pkl')
+            # mmcv.dump(result_input, res_path)
         return result_files, tmp_dir
 
     def _evaluate_single(self,
@@ -1807,19 +1806,6 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
             result_dict['FDE_'+cls] = all_metric_dict['FDE_'+cls] / all_metric_dict['cnt_fde_'+cls]
             result_dict['MR_'+cls] = all_metric_dict['MR_'+cls] / all_metric_dict['cnt_fde_'+cls]
         
-        # 加入description
-        for i in range(len(results)):
-            metric_results = results[i]['metric_results']
-            for key in metric_results.keys():
-                if key.startswith('description_'):
-                    if not key in all_metric_dict:
-                        all_metric_dict[key] = []
-                    all_metric_dict[key].append(metric_results[key])
-
-        for k in all_metric_dict:
-            if k.startswith('description_'):
-                result_dict[k] = sum(all_metric_dict[k]) / len(all_metric_dict[k])
-        
         print('\n')
         print('-------------- Motion Prediction --------------')
         for k, v in result_dict.items():
@@ -1843,7 +1829,7 @@ class GenADCustomNuScenesDataset(NuScenesDataset):
         
         for k in metric_dict:
             metric_dict[k] = metric_dict[k] / num_valid
-            print("{}:{}".format(k, metric_dict[k]))
+            print("{}: {}".format(k, metric_dict[k]))
 
         result_files, tmp_dir = self.format_results(results, file_name, jsonfile_prefix)
 

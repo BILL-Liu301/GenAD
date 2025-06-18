@@ -92,12 +92,18 @@ def create_nuscenes_infos(root_path,
         train_scenes = splits.train
         val_scenes = splits.val
         # 手动减少数据量
-        import random
-        train_scenes = random.sample(train_scenes, 100)
-        val_scenes = random.sample(val_scenes, 50)
+        # import random
+        # train_scenes = random.sample(train_scenes, 1)
+        # val_scenes = random.sample(val_scenes, 1)
+        # train_scenes = train_scenes[10:15]
+        # val_scenes = val_scenes[10:15]
     elif version == 'v1.0-test':
         train_scenes = splits.test
         val_scenes = []
+        # 手动减少数据量
+        # import random
+        # train_scenes = random.sample(train_scenes, 1)
+        # train_scenes = train_scenes[10:15]
     elif version == 'v1.0-mini':
         train_scenes = splits.mini_train
         val_scenes = splits.mini_val
@@ -108,8 +114,7 @@ def create_nuscenes_infos(root_path,
     # 找出可用的场景，主要是根据是否有本地数据进行判断
     available_scenes = get_available_scenes(nusc)
     available_scene_names = [s['name'] for s in available_scenes]
-    train_scenes = list(
-        filter(lambda x: x in available_scene_names, train_scenes))
+    train_scenes = list(filter(lambda x: x in available_scene_names, train_scenes))
     val_scenes = list(filter(lambda x: x in available_scene_names, val_scenes))
     train_scenes = set([
         available_scenes[available_scene_names.index(s)]['token']
@@ -327,6 +332,9 @@ def _fill_trainval_infos(nusc: NuScenes,
         cat2idx[dic['name']] = idx
 
     for sample in mmcv.track_iter_progress(nusc.sample):
+        if not sample['scene_token'] in [*train_scenes, *val_scenes]:
+            continue
+
         map_location = nusc.get('log', nusc.get('scene', sample['scene_token'])['log_token'])['location']
         lidar_token = sample['data']['LIDAR_TOP']
         sd_rec = nusc.get('sample_data', lidar_token)
@@ -379,16 +387,16 @@ def _fill_trainval_infos(nusc: NuScenes,
             'timestamp': sample['timestamp'],
             'fut_valid_flag': fut_valid_flag,
             'map_location': map_location,
-            'gt_descriptions': {}
+            # 'gt_descriptions': {}
         }
 
-        # 获取当前ego所在的道路类型
-        road_type, road_type_one_hot, road_type_all = get_road_type(nusc, map_location, pose_record)
-        info['gt_descriptions'].update({
-            'road_type': road_type,
-            'road_type_one_hot': road_type_one_hot.astype(np.float32),
-            'road_type_all': road_type_all
-        })
+        # # 获取当前ego所在的道路类型
+        # road_type, road_type_one_hot, road_type_all = get_road_type(nusc, map_location, pose_record)
+        # info['gt_descriptions'].update({
+        #     'road_type': road_type,
+        #     'road_type_one_hot': road_type_one_hot.astype(np.float32),
+        #     'road_type_all': road_type_all
+        # })
 
         # 当 sample['next'] == '' 时，表示当前帧为最后一帧，需要将 frame_idx 重置为 0
         if sample['next'] == '':
@@ -610,7 +618,7 @@ def _fill_trainval_infos(nusc: NuScenes,
                 raise ValueError('x_end out of range')
 
             # 获取当前道路交通情况
-            traffic_condition, traffic_condition_one_hot, traffic_condition_all = get_traffic_condition(agent_lcf_feat, names)
+            # traffic_condition, traffic_condition_one_hot, traffic_condition_all = get_traffic_condition(agent_lcf_feat, names)
 
             # offset from lcf -> per-step offset
             ego_fut_trajs = ego_fut_trajs[1:] - ego_fut_trajs[:-1]
@@ -685,11 +693,11 @@ def _fill_trainval_infos(nusc: NuScenes,
             info['gt_ego_fut_masks'] = ego_fut_masks[1:].astype(np.float32)
             info['gt_ego_fut_cmd'] = command.astype(np.float32)  # 指令
             info['gt_ego_lcf_feat'] = ego_lcf_feat.astype(np.float32)
-            info['gt_descriptions'].update({
-                'traffic_condition': traffic_condition,
-                'traffic_condition_one_hot': traffic_condition_one_hot.astype(np.float32),
-                'traffic_condition_all': traffic_condition_all
-            })
+            # info['gt_descriptions'].update({
+            #     'traffic_condition': traffic_condition,
+            #     'traffic_condition_one_hot': traffic_condition_one_hot.astype(np.float32),
+            #     'traffic_condition_all': traffic_condition_all
+            # })
 
         if sample['scene_token'] in train_scenes:
             train_nusc_infos.append(info)

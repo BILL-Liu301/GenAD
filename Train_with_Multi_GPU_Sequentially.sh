@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# python -m torch.distributed.run --nproc_per_node=4 --master_port=2333 tools/train.py projects/configs/GenAD/GenAD_config.py --launcher pytorch --deterministic --work-dir outputs --cfg-options use_description=true description_ca_bev=true description_ca_map=false description_ca_motion=false
+# python -m torch.distributed.run --nproc_per_node=4 --master_port=2333 tools/train.py projects/configs/GenAD/GenAD_config.py --launcher pytorch --deterministic --work-dir outputs --cfg-options use_description=true description_ca_bev=false description_ca_map=true description_ca_motion=false
+# python -m torch.distributed.run --nproc_per_node=4 --master_port=2333 tools/train.py projects/configs/GenAD/GenAD_config.py --launcher pytorch --deterministic --work-dir outputs --cfg-options use_description=true description_ca_bev=false description_ca_map=false description_ca_motion=true
+# python -m torch.distributed.run --nproc_per_node=4 --master_port=2333 tools/train.py projects/configs/GenAD/GenAD_config.py --launcher pytorch --deterministic --work-dir outputs --cfg-options use_description=true description_ca_bev=false description_ca_map=true description_ca_motion=true
+# python -m torch.distributed.run --nproc_per_node=4 --master_port=2333 tools/train.py projects/configs/GenAD/GenAD_config.py --launcher pytorch --deterministic --work-dir outputs --cfg-options use_description=true description_ca_bev=true description_ca_map=true description_ca_motion=true
+python -m torch.distributed.run --nproc_per_node=4 --master_port=2333 tools/train.py projects/configs/GenAD/GenAD_config.py --launcher pytorch --deterministic --work-dir outputs --cfg-options use_description=false description_ca_bev=false description_ca_map=false description_ca_motion=false

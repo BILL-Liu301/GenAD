@@ -42,7 +42,11 @@ _num_levels_ = 1
 bev_h_ = 100
 bev_w_ = 100
 queue_length = 3 # each sequence contains `queue_length` frames.
-total_epochs = 200
+total_epochs = 100
+use_description = False
+description_ca_bev = False
+description_ca_map = False
+description_ca_motion = False
 
 model = dict(
     type='GenAD',
@@ -66,6 +70,10 @@ model = dict(
         add_extra_convs='on_output',
         num_outs=_num_levels_,
         relu_before_extra_convs=True),
+    description_head=dict(
+        type='DescriptionHead',
+        use=use_description,
+    ),
     pts_bbox_head=dict(
         type='GenADHead',
         map_thresh=0.5,
@@ -128,6 +136,58 @@ model = dict(
                 ffn_dropout=0.1,
                 operation_order=('cross_attn', 'norm', 'ffn', 'norm'))),
         motion_map_decoder=dict(
+            type='CustomTransformerDecoder',
+            num_layers=1,
+            return_intermediate=False,
+            transformerlayers=dict(
+                type='BaseTransformerLayer',
+                attn_cfgs=[
+                    dict(
+                        type='MultiheadAttention',
+                        embed_dims=_dim_,
+                        num_heads=8,
+                        dropout=0.1),
+                ],
+                feedforward_channels=_ffn_dim_,
+                ffn_dropout=0.1,
+                operation_order=('cross_attn', 'norm', 'ffn', 'norm'))),
+        use_description=use_description,
+        description_ca_bev=description_ca_bev,
+        description_ca_map=description_ca_map,
+        description_ca_motion=description_ca_motion,
+        description_bev_ca=dict(
+            type='CustomTransformerDecoder',
+            num_layers=1,
+            return_intermediate=False,
+            transformerlayers=dict(
+                type='BaseTransformerLayer',
+                attn_cfgs=[
+                    dict(
+                        type='MultiheadAttention',
+                        embed_dims=_dim_,
+                        num_heads=8,
+                        dropout=0.1),
+                ],
+                feedforward_channels=_ffn_dim_,
+                ffn_dropout=0.1,
+                operation_order=('cross_attn', 'norm', 'ffn', 'norm'))),
+        description_motion_ca=dict(
+            type='CustomTransformerDecoder',
+            num_layers=1,
+            return_intermediate=False,
+            transformerlayers=dict(
+                type='BaseTransformerLayer',
+                attn_cfgs=[
+                    dict(
+                        type='MultiheadAttention',
+                        embed_dims=_dim_,
+                        num_heads=8,
+                        dropout=0.1),
+                ],
+                feedforward_channels=_ffn_dim_,
+                ffn_dropout=0.1,
+                operation_order=('cross_attn', 'norm', 'ffn', 'norm'))),
+        description_map_ca=dict(
             type='CustomTransformerDecoder',
             num_layers=1,
             return_intermediate=False,
@@ -312,8 +372,8 @@ model = dict(
             pc_range=point_cloud_range))))
 
 dataset_type = 'GenADCustomNuScenesDataset'
-data_root = '/workspace/genad/GenAD/data/nuscenes/'
-data_root_ = '/workspace/genad/GenAD/data/nuscenes/'
+data_root = 'data/nuscenes/'
+data_root_ = 'data/nuscenes/'
 file_client_args = dict(backend='disk')
 
 train_pipeline = [
@@ -329,8 +389,9 @@ train_pipeline = [
     dict(type='CustomCollect3D',\
          keys=['gt_bboxes_3d', 'gt_labels_3d', 'img', 'ego_his_trajs',
                'ego_fut_trajs', 'ego_fut_masks', 'ego_fut_cmd', 'ego_lcf_feat', 'gt_attr_labels',
-               'road_type', 'road_type_one_hot', 'road_type_all',
-                'traffic_condition', 'traffic_condition_one_hot', 'traffic_condition_all'
+            #    'road_type', 'road_type_one_hot', 'road_type_all',
+            #    'traffic_condition', 'traffic_condition_one_hot', 'traffic_condition_all',
+               'contents', 'answers', 'answers_token'
                ])
 ]
 
@@ -359,8 +420,9 @@ test_pipeline = [
                  keys=['points', 'gt_bboxes_3d', 'gt_labels_3d', 'img', 'fut_valid_flag',
                        'ego_his_trajs', 'ego_fut_trajs', 'ego_fut_masks', 'ego_fut_cmd',
                        'ego_lcf_feat', 'gt_attr_labels',
-                       'road_type', 'road_type_one_hot', 'road_type_all',
-                        'traffic_condition', 'traffic_condition_one_hot', 'traffic_condition_all'
+                    #    'road_type', 'road_type_one_hot', 'road_type_all',
+                    #    'traffic_condition', 'traffic_condition_one_hot', 'traffic_condition_all',
+                       'contents', 'answers', 'answers_token'
                     ])])
 ]
 
@@ -370,7 +432,8 @@ data = dict(
     train=dict(
         type=dataset_type,
         data_root=data_root,
-        ann_file=data_root_ + 'vad_nuscenes_infos_temporal_train.pkl',
+        # ann_file=data_root_ + 'vad_nuscenes_infos_temporal_train.pkl',
+        ann_file=data_root_ + 'vad_nuscenes_infos_temporal_train_with_description.pkl',
         # ann_file=data_root_ + 'genad_nuscenes_infos_train.pkl',
         pipeline=train_pipeline,
         classes=class_names,
@@ -390,7 +453,8 @@ data = dict(
     val=dict(type=dataset_type,
              pc_range=point_cloud_range,
              data_root=data_root,
-             ann_file=data_root_ + 'vad_nuscenes_infos_temporal_val.pkl',
+            #  ann_file=data_root_ + 'vad_nuscenes_infos_temporal_val.pkl',
+             ann_file=data_root_ + 'vad_nuscenes_infos_temporal_val_with_description.pkl',
             #  ann_file=data_root_ + 'genad_nuscenes_infos_val.pkl',
              pipeline=test_pipeline,  bev_size=(bev_h_, bev_w_),
              classes=class_names, modality=input_modality, samples_per_gpu=1,
@@ -403,8 +467,10 @@ data = dict(
     test=dict(type=dataset_type,
               data_root=data_root,
               pc_range=point_cloud_range,
-              ann_file=data_root_ + 'vad_nuscenes_infos_temporal_val.pkl',
+            #  ann_file=data_root_ + 'vad_nuscenes_infos_temporal_val.pkl',
+              ann_file=data_root_ + 'vad_nuscenes_infos_temporal_val_with_description.pkl',
             #   ann_file=data_root_ + 'genad_nuscenes_infos_val.pkl',
+            #   ann_file=data_root_ + 'vad_nuscenes_infos_temporal_test_with_description.pkl',
               pipeline=test_pipeline, bev_size=(bev_h_, bev_w_),
               classes=class_names, modality=input_modality, samples_per_gpu=1,
               map_classes=map_classes,
@@ -440,7 +506,7 @@ evaluation = dict(interval=total_epochs, pipeline=test_pipeline, metric='bbox', 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
 
 log_config = dict(
-    interval=100,
+    interval=50,
     hooks=[
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')

@@ -24,7 +24,7 @@ conda install -c omgarcia gcc-5 # gcc-6.2
 **c. Install mmcv-full.**
 ```shell
 pip install mmcv-full==1.4.0
-#  pip install mmcv-full==1.4.0 -f https://download.openmmlab.com/mmcv/dist/cu111/torch1.9.0/index.html
+#  pip install mmcv-full==1.4.0 -f https://download.openmmlab.com/mmcv/dist/cu111/torch1.9.1/index.html
 ```
 
 **d. Install mmdet and mmseg.**
@@ -44,7 +44,8 @@ conda activate genad
 git clone https://github.com/open-mmlab/mmdetection3d.git
 cd /path/to/mmdetection3d
 git checkout -f v0.17.1
-python setup.py develop
+# python setup.py develop
+pip install -e .
 ```
 
 **g. Install nuscenes-devkit.**

@@ -236,10 +236,7 @@ def main():
     if not distributed:
         # assert False
         model = MMDataParallel(model, device_ids=[0])
-        print('Testing For Origin Dataset ...')
-        outputs = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=False)
-        # print('Testing With Change Cmd ...')
-        # outputs_change_cmd = single_gpu_test(model, data_loader, args.show, args.show_dir, change_cmd=True)
+        outputs = single_gpu_test(model, data_loader, args.show, args.show_dir)
     else:
         assert False
         model = MMDistributedDataParallel(
@@ -251,7 +248,6 @@ def main():
 
     tmp = {}
     tmp['bbox_results'] = outputs
-    # tmp['bbox_results_change_cmd'] = outputs_change_cmd
     outputs = tmp
     rank, _ = get_dist_info()
     assert rank == 0
@@ -264,9 +260,20 @@ def main():
             else:
                 mmcv.dump(outputs['bbox_results'], args.out)
         kwargs = {} if args.eval_options is None else args.eval_options
+        folder_name = 'with_description_ca'
+        if cfg.use_description:
+            folder_name = 'with_description_ca'
+            if cfg.description_ca_bev:
+                folder_name += '_bev'
+            if cfg.description_ca_map:
+                folder_name += '_map'
+            if cfg.description_ca_motion:
+                folder_name += '_motion'
+        else:
+            folder_name = 'without_description'
         kwargs['jsonfile_prefix'] = osp.join(
-            # 'test', args.config.split('/')[-1].split('.')[-2], time.ctime().replace(' ', '_').replace(':', '_')
-            'test', args.config.split('/')[-1].split('.')[-2], 'results'
+            'test', 
+            folder_name
         )
         if args.format_only:
             assert False
@@ -283,13 +290,12 @@ def main():
             eval_kwargs.update(dict(metric=args.eval, **kwargs))
 
             # 打印了一对东西，反正我没看懂
-            # 所以我在此处抑制
-            import contextlib
-            import io
-            f = io.StringIO()
-            print('Dealing with Result ...')
-            with contextlib.redirect_stdout(f):
-                results_dict = dataset.evaluate(outputs['bbox_results'], 'results_nusc', **eval_kwargs)
+            # # 所以我在此处抑制
+            # import contextlib
+            # import io
+            # f = io.StringIO()
+            # with contextlib.redirect_stdout(f):
+            results_dict = dataset.evaluate(outputs['bbox_results'], 'results_nusc', **eval_kwargs)
             # print('Dealing with Result Change CMD ...')
             # with contextlib.redirect_stdout(f):
             #     results_dict_change_cmd = dataset.evaluate(outputs['bbox_results_change_cmd'], 'results_nusc_change_cmd', **eval_kwargs)

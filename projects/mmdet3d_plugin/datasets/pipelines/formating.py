@@ -52,16 +52,10 @@ class CustomDefaultFormatBundle3D(DefaultFormatBundle3D):
             if 'gt_attr_labels' in results:
                 results['gt_attr_labels'] = DC(to_tensor(results['gt_attr_labels']), cpu_only=False)\
         
-        if 'road_type' in results:
-            results['road_type'] = DC(np.array(results['road_type']).reshape(1, 1, -1), cpu_only=True, stack=True)
-        if 'road_type_one_hot' in results:
-            results['road_type_one_hot'] = DC(to_tensor(results['road_type_one_hot'].reshape(1, 1, -1)), stack=True)
-        if 'road_type_all' in results:
-            results['road_type_all'] = DC(np.array(results['road_type_all']).reshape(1, 1, -1), cpu_only=True, stack=True)
-        if 'traffic_condition' in results:
-            results['traffic_condition'] = DC(np.array(results['traffic_condition']).reshape(1, 1, -1), cpu_only=True, stack=True)
-        if 'traffic_condition_one_hot' in results:
-            results['traffic_condition_one_hot'] = DC(to_tensor(results['traffic_condition_one_hot'].reshape(1, 1, -1)), stack=True)
-        if 'traffic_condition_all' in results:
-            results['traffic_condition_all'] = DC(np.array(results['traffic_condition_all']).reshape(1, 1, -1), cpu_only=True, stack=True)
+        if 'contents' in results:
+            results['contents'] = DC(np.array(results['contents']).reshape(-1), cpu_only=True, stack=False)
+        if 'answers' in results:
+            results['answers'] = DC(np.array(results['answers']).reshape(-1), cpu_only=True, stack=False)
+        if 'answers_token' in results:
+            results['answers_token'] = DC(np.array(results['answers_token']), cpu_only=True, stack=False)
         return results

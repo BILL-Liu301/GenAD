@@ -11,7 +11,7 @@ from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
 from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 from projects.mmdet3d_plugin.GenAD.planner.metric_stp3 import PlanningMetric
 
-from .CLIP_head import CLIPHead
+from .Description_head import DescriptionHead
 
 @DETECTORS.register_module()
 class GenAD(MVXTwoStageDetector):
@@ -28,6 +28,7 @@ class GenAD(MVXTwoStageDetector):
                  img_neck=None,
                  pts_neck=None,
                  pts_bbox_head=None,
+                 description_head=None,
                  img_roi_head=None,
                  img_rpn_head=None,
                  train_cfg=None,
@@ -38,20 +39,24 @@ class GenAD(MVXTwoStageDetector):
                  fut_mode=6
                  ):
 
-        super(GenAD,
-              self).__init__(pts_voxel_layer, pts_voxel_encoder,
-                             pts_middle_encoder, pts_fusion_layer,
-                             img_backbone, pts_backbone, img_neck, pts_neck,
-                             pts_bbox_head, img_roi_head, img_rpn_head,
-                             train_cfg, test_cfg, pretrained)
-        self.grid_mask = GridMask(
-            True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
+        super(GenAD,self).__init__(
+            pts_voxel_layer, pts_voxel_encoder,
+            pts_middle_encoder, pts_fusion_layer,
+            img_backbone, pts_backbone, img_neck, pts_neck,
+            pts_bbox_head, img_roi_head, img_rpn_head,
+            train_cfg, test_cfg, pretrained
+        )
+        self.grid_mask = GridMask(True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
         self.use_grid_mask = use_grid_mask
         self.fp16_enabled = False
         self.fut_ts = fut_ts
         self.fut_mode = fut_mode
         self.valid_fut_ts = pts_bbox_head['valid_fut_ts']
-        self.clip_head = CLIPHead("cuda")
+        self.use_description = description_head['use']
+        if self.use_description:
+            self.description_head = DescriptionHead()
+        else:
+            self.description_head = None
 
         # temporal
         self.video_test_mode = video_test_mode
@@ -123,9 +128,7 @@ class GenAD(MVXTwoStageDetector):
                           ego_fut_cmd=None,
                           ego_lcf_feat=None,
                           gt_attr_labels=None,
-                          vlm_img_feats=None,
-                          vlm_descriptions=None,
-                          gt_descriptions=None
+                          description_feats=None
                           ):
         """Forward function'
         Args:
@@ -148,7 +151,7 @@ class GenAD(MVXTwoStageDetector):
             ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,
             gt_labels_3d=gt_labels_3d, gt_attr_labels=gt_attr_labels,
             ego_fut_trajs=ego_fut_trajs, ego_fut_cmd=ego_fut_cmd,
-            vlm_img_feats=vlm_img_feats
+            description_feats=description_feats
         )
 
         # 计算loss
@@ -157,9 +160,7 @@ class GenAD(MVXTwoStageDetector):
             outs, ego_fut_trajs, ego_fut_masks, ego_fut_cmd, gt_attr_labels
         ]
         losses = self.pts_bbox_head.loss(
-            *loss_inputs, 
-            vlm_descriptions=vlm_descriptions,
-            gt_descriptions=gt_descriptions,
+            *loss_inputs,
             img_metas=img_metas
         )
         return losses
@@ -200,6 +201,23 @@ class GenAD(MVXTwoStageDetector):
                 prev_bev = self.pts_bbox_head(img_feats, img_metas, prev_bev, only_bev=True)  # 只针对bev进行计算
             self.train()
             return prev_bev
+
+    def get_description_feats(self, dtype, device, **kwargs):
+        # 将answers转换为description_feats
+        description_feats = []
+        answers = flatten_data_from_list(kwargs['answers'])
+        # answers = flatten_data_from_list(kwargs['answers_token'])
+        for des in answers:
+            des_feat = self.description_head(text=des.item(), device=device).to(dtype)
+            # des_feat = self.description_head(tokens=des, device=device).to(dtype)
+            des_feat = des_feat.permute(1, 0, 2)  # [n, B, 256]
+            description_feats.append(des_feat)
+        description_feats = {
+            'bev': description_feats[0],
+            'motion': description_feats[1],
+            'map': description_feats[2]
+        }
+        return description_feats
 
     # @auto_fp16(apply_to=('img', 'points'))
     @force_fp32(apply_to=('img','points','prev_bev'))
@@ -258,14 +276,24 @@ class GenAD(MVXTwoStageDetector):
         prev_img_metas = copy.deepcopy(img_metas)
         prev_bev = self.obtain_history_bev(prev_img, prev_img_metas) if len_queue > 1 else None  # 先self.extract_feat后self.pts_bbox_head
 
-        # 从当前图像中获取当前特征信息
-        vlm_img_feats, vlm_descriptions = self.clip_head(img)
-
-        # 合并gt_descriptions
-        gt_descriptions = {
-            'road_type_one_hot': flatten_data_from_list(kwargs['road_type_one_hot']),
-            'traffic_condition_one_hot': flatten_data_from_list(kwargs['traffic_condition_one_hot'])
-        }
+        if self.use_description:
+            # # 将answers转换为description_feats
+            # description_feats = []
+            # answers = kwargs['answers'][0]
+            # # answers_token = kwargs['answers_token'][0]
+            # for des in answers:
+            #     des_feat = self.description_head(text=des.item(), device=prev_bev.device).to(prev_bev.dtype)
+            #     # des_feat = self.description_head(tokens=des, device=prev_bev.device).to(prev_bev.dtype)
+            #     des_feat = des_feat.permute(1, 0, 2)  # [n, B, 256]
+            #     description_feats.append(des_feat)
+            # description_feats = {
+            #     'bev': description_feats[0],
+            #     'motion': description_feats[1],
+            #     'map': description_feats[2]
+            # }
+            description_feats = self.get_description_feats(prev_bev.dtype, prev_bev.device, **kwargs)
+        else:
+            description_feats = None
 
         # 提取图像特征
         img_metas = [each[len_queue-1] for each in img_metas]
@@ -281,7 +309,7 @@ class GenAD(MVXTwoStageDetector):
             ego_his_trajs=ego_his_trajs, ego_fut_trajs=ego_fut_trajs,
             ego_fut_masks=ego_fut_masks, ego_fut_cmd=ego_fut_cmd,
             ego_lcf_feat=ego_lcf_feat, gt_attr_labels=gt_attr_labels,
-            vlm_img_feats=vlm_img_feats, vlm_descriptions=vlm_descriptions, gt_descriptions=gt_descriptions
+            description_feats=description_feats
         )
 
         losses.update(losses_pts)
@@ -365,17 +393,19 @@ class GenAD(MVXTwoStageDetector):
     ):
         """Test function without augmentaiton."""
 
-        # 从当前图像中获取当前特征信息
-        vlm_img_feats, vlm_descriptions = self.clip_head(img)
-        # 合并gt_descriptions
-        gt_descriptions = {
-            'road_type': flatten_data_from_list(kwargs['road_type']),
-            'road_type_one_hot': flatten_data_from_list(kwargs['road_type_one_hot']),
-            'road_type_all': flatten_data_from_list(kwargs['road_type_all']),
-            'traffic_condition': flatten_data_from_list(kwargs['traffic_condition']),
-            'traffic_condition_one_hot': flatten_data_from_list(kwargs['traffic_condition_one_hot']),
-            'traffic_condition_all': flatten_data_from_list(kwargs['traffic_condition_all'])
-        }
+        if self.use_description:
+            # # 将description_answer转换为description_feats
+            # description_feats = []
+            # for des in kwargs['description_answer']:
+            #     des = flatten_data_from_list(des).item()
+            #     des = des.split('<answer>')[1].split('<|endofchunk|>')[0]  # 只取精华
+            #     des_feat = self.description_head(des, img.device).to(img.dtype)
+            #     description_feats.append(des_feat)
+            # description_feats = torch.cat(description_feats, dim=0)
+            # description_feats = description_feats.permute(1, 0, 2)  # [n, B, 256]
+            description_feats = self.get_description_feats(img.dtype, img.device, **kwargs)
+        else:
+            description_feats = None
 
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
         bbox_list = [dict() for i in range(len(img_metas))]
@@ -394,9 +424,7 @@ class GenAD(MVXTwoStageDetector):
             ego_fut_cmd=ego_fut_cmd,
             ego_lcf_feat=ego_lcf_feat,
             gt_attr_labels=gt_attr_labels,
-            vlm_img_feats=vlm_img_feats,
-            vlm_descriptions=vlm_descriptions,
-            gt_descriptions=gt_descriptions
+            description_feats=description_feats
         )
         for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
             result_dict['pts_bbox'] = pts_bbox
@@ -419,9 +447,7 @@ class GenAD(MVXTwoStageDetector):
         ego_fut_cmd=None,
         ego_lcf_feat=None,
         gt_attr_labels=None,
-        vlm_img_feats=None,
-        vlm_descriptions=None,
-        gt_descriptions=None
+        description_feats=None
     ):
         """Test function"""
         mapped_class_names = [
@@ -434,7 +460,7 @@ class GenAD(MVXTwoStageDetector):
         outs = self.pts_bbox_head(
             x, img_metas, prev_bev=prev_bev,
             ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat,ego_fut_cmd=ego_fut_cmd,
-            vlm_img_feats=vlm_img_feats
+            description_feats=description_feats
         )
         bbox_list = self.pts_bbox_head.get_bboxes(outs, img_metas, rescale=rescale)
 
@@ -447,8 +473,6 @@ class GenAD(MVXTwoStageDetector):
             bbox_result['ego_fut_preds'] = outs['ego_fut_preds'][i].cpu()
             bbox_result['ego_fut_cmd'] = ego_fut_cmd.cpu()
             bbox_results.append(bbox_result)
-        bbox_result['vlm_descriptions'] = {k: v.softmax(dim=-1).cpu().numpy() for k, v in vlm_descriptions.items()}
-        bbox_result['gt_descriptions'] = {k: v.cpu().numpy() if isinstance(v, torch.Tensor) else v for k, v in gt_descriptions.items()}
 
         assert len(bbox_results) == 1, 'only support batch_size=1 now'
         score_threshold = 0.6
@@ -492,10 +516,6 @@ class GenAD(MVXTwoStageDetector):
                 fut_valid_flag = fut_valid_flag
             )
             metric_dict.update(metric_dict_planner_stp3)
-
-            metric_ = self.pts_bbox_head.loss_description(vlm_descriptions, gt_descriptions)
-            metric_ = {f'description_{k}': v.cpu().item() for k, v in metric_.items()}
-            metric_dict.update(metric_)
 
         return outs['bev_embed'], bbox_results, metric_dict
 
